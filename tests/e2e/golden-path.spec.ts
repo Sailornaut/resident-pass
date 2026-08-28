@@ -1,10 +1,11 @@
 import { createClient } from "@supabase/supabase-js";
-import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
-const MAILPIT_URL = "http://127.0.0.1:54324";
+const E2E_PASSWORD = "ResidentPass-E2E-2026!";
 const E2E_PLATE = "E2E1234";
-const INVITED_EMAIL = "e2e.invited@example.com";
+const ASSIGNED_EMAIL = "e2e.assigned@example.com";
+const SIGNUP_EMAIL = "e2e.signup@example.com";
 
 const adminClient = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -12,51 +13,15 @@ const adminClient = createClient(
   { auth: { autoRefreshToken: false, persistSession: false } }
 );
 
-async function signInWithMagicLink(
+async function signInWithPassword(
   page: Page,
-  request: APIRequestContext,
   email: string,
   destination: RegExp
 ) {
-  const inboxBefore = await request.get(`${MAILPIT_URL}/api/v1/messages`);
-  expect(inboxBefore.ok()).toBeTruthy();
-  const existingIds = new Set<string>(
-    ((await inboxBefore.json()).messages ?? []).map(
-      (message: { ID: string }) => message.ID
-    )
-  );
-
   await page.goto("/auth/sign-in");
   await page.getByLabel("Email address").fill(email);
-  await page.getByRole("button", { name: "Email me a sign-in link" }).click();
-  await expect(page.getByText(`Check your email — we sent a sign-in link to ${email}.`)).toBeVisible();
-
-  let messageId: string | undefined;
-  await expect
-    .poll(
-      async () => {
-        const response = await request.get(`${MAILPIT_URL}/api/v1/messages`);
-        const inbox = await response.json();
-        const message = (inbox.messages ?? []).find(
-          (candidate: { ID: string; To: Array<{ Address: string }> }) =>
-            !existingIds.has(candidate.ID) &&
-            candidate.To.some((recipient) => recipient.Address === email)
-        );
-        messageId = message?.ID;
-        return Boolean(messageId);
-      },
-      { timeout: 10_000 }
-    )
-    .toBe(true);
-
-  const messageResponse = await request.get(
-    `${MAILPIT_URL}/api/v1/message/${messageId}`
-  );
-  const message = await messageResponse.json();
-  const magicLink = (message.Text as string).match(/https?:\/\/[^\s)]+/)?.[0];
-  expect(magicLink).toBeTruthy();
-
-  await page.goto(magicLink!);
+  await page.getByLabel("Password", { exact: true }).fill(E2E_PASSWORD);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(page).toHaveURL(destination);
 }
 
@@ -79,23 +44,23 @@ test.beforeEach(async () => {
 
 test.afterAll(async () => {
   const { data } = await adminClient.auth.admin.listUsers({ page: 1, perPage: 1000 });
-  const invitedUser = data.users.find((user) => user.email === INVITED_EMAIL);
-  if (invitedUser) {
-    await adminClient.from("users").delete().eq("id", invitedUser.id);
-    await adminClient.auth.admin.deleteUser(invitedUser.id);
+  const removableUsers = data.users.filter((user) =>
+    [ASSIGNED_EMAIL, SIGNUP_EMAIL].includes(user.email ?? "")
+  );
+  for (const user of removableUsers) {
+    await adminClient.from("users").delete().eq("id", user.id);
+    await adminClient.auth.admin.deleteUser(user.id);
   }
 });
 
 test("resident issues a pass, enforcement verifies it, and admin revokes it", async ({
   browser,
-  request,
 }) => {
   const residentContext = await browser.newContext({ baseURL: APP_URL });
   const residentPage = await residentContext.newPage();
 
-  await signInWithMagicLink(
+  await signInWithPassword(
     residentPage,
-    request,
     "drew.nguyen@example.com",
     /\/dashboard$/
   );
@@ -125,9 +90,8 @@ test("resident issues a pass, enforcement verifies it, and admin revokes it", as
 
   const adminContext = await browser.newContext({ baseURL: APP_URL });
   const adminPage = await adminContext.newPage();
-  await signInWithMagicLink(
+  await signInWithPassword(
     adminPage,
-    request,
     "admin@oakridge.example.com",
     /\/admin\/dashboard$/
   );
@@ -152,7 +116,6 @@ test("resident issues a pass, enforcement verifies it, and admin revokes it", as
 test("cancelled passes still consume the rolling monthly allowance", async ({
   browser,
   page,
-  request,
 }) => {
   const { data: resident, error: residentError } = await adminClient
     .from("users")
@@ -185,9 +148,8 @@ test("cancelled passes still consume the rolling monthly allowance", async ({
   );
   if (insertError) throw insertError;
 
-  await signInWithMagicLink(
+  await signInWithPassword(
     page,
-    request,
     "drew.nguyen@example.com",
     /\/dashboard$/
   );
@@ -215,9 +177,8 @@ test("cancelled passes still consume the rolling monthly allowance", async ({
 
   const adminContext = await browser.newContext({ baseURL: APP_URL });
   const adminPage = await adminContext.newPage();
-  await signInWithMagicLink(
+  await signInWithPassword(
     adminPage,
-    request,
     "admin@oakridge.example.com",
     /\/admin\/dashboard$/
   );
@@ -247,7 +208,7 @@ test("cancelled passes still consume the rolling monthly allowance", async ({
   await adminContext.close();
 });
 
-test("an Oak Ridge admin cannot access a Pine Creek pass", async ({ page, request }) => {
+test("an Oak Ridge admin cannot access a Pine Creek pass", async ({ page }) => {
   const { data: pinePass, error } = await adminClient
     .from("parking_passes")
     .select("id")
@@ -255,9 +216,8 @@ test("an Oak Ridge admin cannot access a Pine Creek pass", async ({ page, reques
     .single();
   if (error) throw error;
 
-  await signInWithMagicLink(
+  await signInWithPassword(
     page,
-    request,
     "admin@oakridge.example.com",
     /\/admin\/dashboard$/
   );
@@ -266,37 +226,86 @@ test("an Oak Ridge admin cannot access a Pine Creek pass", async ({ page, reques
   expect(response?.status()).toBe(404);
 });
 
-test("an admin can invite a resident and assign a unit", async ({ page, request }) => {
-  await signInWithMagicLink(
+test("an admin can assign an existing resident account to a unit", async ({ page }) => {
+  const { data: existingUsers } = await adminClient.auth.admin.listUsers({
+    page: 1,
+    perPage: 1000,
+  });
+  const oldUser = existingUsers.users.find((user) => user.email === ASSIGNED_EMAIL);
+  if (oldUser) {
+    await adminClient.from("users").delete().eq("id", oldUser.id);
+    await adminClient.auth.admin.deleteUser(oldUser.id);
+  }
+  const { error: createError } = await adminClient.auth.admin.createUser({
+    email: ASSIGNED_EMAIL,
+    password: E2E_PASSWORD,
+    email_confirm: true,
+  });
+  if (createError) throw createError;
+
+  await signInWithPassword(
     page,
-    request,
     "admin@oakridge.example.com",
     /\/admin\/dashboard$/
   );
 
   await page.goto("/admin/units");
-  await page.getByLabel("Resident email").fill(INVITED_EMAIL);
-  await page.getByLabel("Resident name").fill("E2E Invited Resident");
+  await page.getByLabel("Resident email").fill(ASSIGNED_EMAIL);
+  await page.getByLabel("Resident name").fill("E2E Assigned Resident");
   await page.locator("#resident_unit_id").selectOption({ label: "104 — 100 Oak Ridge Dr, Unit 104" });
-  await page.getByRole("button", { name: "Invite resident" }).click();
+  await page.getByRole("button", { name: "Assign resident" }).click();
 
-  await expect(page.getByText(`Invitation sent to ${INVITED_EMAIL}.`)).toBeVisible();
+  await expect(
+    page.getByText(`${ASSIGNED_EMAIL} is now assigned to the selected unit.`)
+  ).toBeVisible();
 
-  const { data: invitedUser, error: userError } = await adminClient
+  const { data: assignedUser, error: userError } = await adminClient
     .from("users")
     .select("id")
-    .eq("email", INVITED_EMAIL)
+    .eq("email", ASSIGNED_EMAIL)
     .single();
   if (userError) throw userError;
 
   const { data: membership, error: membershipError } = await adminClient
     .from("memberships")
     .select("role, status, units(unit_label)")
-    .eq("user_id", invitedUser.id)
+    .eq("user_id", assignedUser.id)
     .single();
   if (membershipError) throw membershipError;
 
   expect(membership.role).toBe("resident");
   expect(membership.status).toBe("active");
   expect((membership.units as unknown as { unit_label: string }).unit_label).toBe("104");
+});
+
+test("a resident can create a password account without email confirmation", async ({ page }) => {
+  const { data: existingUsers } = await adminClient.auth.admin.listUsers({
+    page: 1,
+    perPage: 1000,
+  });
+  const oldUser = existingUsers.users.find((user) => user.email === SIGNUP_EMAIL);
+  if (oldUser) {
+    await adminClient.from("users").delete().eq("id", oldUser.id);
+    await adminClient.auth.admin.deleteUser(oldUser.id);
+  }
+
+  await page.goto("/auth/sign-in");
+  await page.getByRole("tab", { name: "Create account" }).click();
+  await page.getByLabel("Email address").fill(SIGNUP_EMAIL);
+  await page.getByLabel("Password", { exact: true }).fill(E2E_PASSWORD);
+  await page.getByLabel("Confirm password").fill(E2E_PASSWORD);
+  await page.getByRole("button", { name: "Create account", exact: true }).click();
+
+  await expect(page).toHaveURL(/\/dashboard$/);
+  await expect(
+    page.getByRole("heading", { name: "No residence linked to your account" })
+  ).toBeVisible();
+
+  const { data: profile, error: profileError } = await adminClient
+    .from("users")
+    .select("email, status")
+    .eq("email", SIGNUP_EMAIL)
+    .single();
+  if (profileError) throw profileError;
+  expect(profile.status).toBe("active");
 });

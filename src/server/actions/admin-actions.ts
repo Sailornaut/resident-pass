@@ -11,7 +11,7 @@ import { createAdminSupabase, createServerSupabase } from "@/lib/db/client";
 import {
   updateRulesSchema,
   createUnitSchema,
-  inviteResidentSchema,
+  addResidentSchema,
   grantPassAllowanceSchema,
   revokePassSchema,
   flattenErrors,
@@ -167,7 +167,7 @@ export async function grantPassAllowanceAction(
   };
 }
 
-export async function inviteResidentAction(
+export async function addResidentAction(
   communityId: string,
   _prev: ActionState,
   formData: FormData
@@ -175,7 +175,7 @@ export async function inviteResidentAction(
   const ctx = await requireAuthorizedContext();
   requireAdminOf(ctx, communityId);
 
-  const parsed = inviteResidentSchema.safeParse({
+  const parsed = addResidentSchema.safeParse({
     email: formData.get("email"),
     full_name: formData.get("full_name") ?? "",
     unit_id: formData.get("unit_id"),
@@ -199,37 +199,21 @@ export async function inviteResidentAction(
   }
 
   const admin = createAdminSupabase();
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "");
-  if (!appUrl) {
-    return { ok: false, message: "The application URL is not configured." };
-  }
-
   const email = parsed.data.email.toLowerCase();
-  const { data: inviteData, error: inviteError } =
-    await admin.auth.admin.inviteUserByEmail(email, {
-      data: parsed.data.full_name
-        ? { full_name: parsed.data.full_name }
-        : undefined,
-      redirectTo: `${appUrl}/auth/sign-in?invited=1`,
-    });
-
-  let authUser = inviteData.user;
-
-  // Retrying an invitation for an existing Auth identity should repair the
-  // app profile/membership instead of leaving the admin stuck.
-  if (inviteError || !authUser) {
-    const { data: existingUsers, error: listError } =
-      await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
-    if (listError) {
-      return { ok: false, message: "Could not create the resident account." };
-    }
-    authUser = existingUsers.users.find(
-      (candidate) => candidate.email?.toLowerCase() === email
-    ) ?? null;
+  const { data: existingUsers, error: listError } =
+    await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+  if (listError) {
+    return { ok: false, message: "Could not look up the resident account." };
   }
+  const authUser = existingUsers.users.find(
+    (candidate) => candidate.email?.toLowerCase() === email
+  );
 
   if (!authUser) {
-    return { ok: false, message: "Could not send the resident invitation." };
+    return {
+      ok: false,
+      message: "No account was found for that email. Ask the resident to create an account first.",
+    };
   }
 
   const { error: userError } = await admin.from("users").upsert(
@@ -243,7 +227,7 @@ export async function inviteResidentAction(
   );
 
   if (userError) {
-    return { ok: false, message: "The invitation was sent, but the resident profile could not be saved." };
+    return { ok: false, message: "The resident profile could not be saved." };
   }
 
   const { error: membershipError } = await admin.from("memberships").upsert(
@@ -258,14 +242,12 @@ export async function inviteResidentAction(
   );
 
   if (membershipError) {
-    return { ok: false, message: "The invitation was sent, but the unit assignment could not be saved." };
+    return { ok: false, message: "The unit assignment could not be saved." };
   }
 
   revalidatePath("/admin/units");
   return {
     ok: true,
-    message: inviteError
-      ? `${email} was already registered and is now assigned to the selected unit.`
-      : `Invitation sent to ${email}.`,
+    message: `${email} is now assigned to the selected unit.`,
   };
 }

@@ -1,16 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { signInErrorMessage } from "@/components/resident/SignInForm";
+import { authErrorMessage } from "@/components/resident/AuthForm";
 
-describe("signInErrorMessage", () => {
-  it("explains Supabase email rate limits", () => {
-    expect(
-      signInErrorMessage({ code: "over_email_send_rate_limit", status: 429 })
-    ).toBe("Too many sign-in emails were requested. Please wait and try again later.");
+describe("authErrorMessage", () => {
+  it("explains Supabase auth rate limits", () => {
+    expect(authErrorMessage({ code: "over_request_rate_limit", status: 429 }, "sign-in"))
+      .toBe("Too many attempts. Please wait a few minutes and try again.");
   });
 
-  it("does not blame the address for an unknown provider error", () => {
-    expect(signInErrorMessage({ code: "unexpected_failure", status: 500 })).toBe(
-      "Could not send the sign-in link. Please try again later."
+  it("does not reveal whether an account exists", () => {
+    expect(authErrorMessage({ code: "invalid_credentials", status: 400 }, "sign-in")).toBe(
+      "The email or password is incorrect."
+    );
+  });
+
+  it("uses a clear fallback for signup failures", () => {
+    expect(authErrorMessage({ code: "unexpected_failure", status: 500 }, "sign-up")).toBe(
+      "Could not create your account. Please try again."
     );
   });
 });

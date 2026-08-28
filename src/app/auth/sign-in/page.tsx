@@ -1,4 +1,4 @@
-import { SignInForm } from "@/components/resident/SignInForm";
+import { AuthForm } from "@/components/resident/AuthForm";
 
 export const metadata = { title: "Sign In" };
 
@@ -14,13 +14,13 @@ export default function SignInPage() {
             {process.env.NEXT_PUBLIC_APP_NAME ?? "ResidentPass"}
           </h1>
           <p className="mt-1 text-sm text-gray-500">
-            Sign in to manage your guest parking passes
+            Manage your guest parking passes
           </p>
         </div>
-        <SignInForm />
+        <AuthForm />
         <p className="text-center text-xs text-gray-400">
-          Accounts are created by invitation from your community. If you haven&apos;t
-          received one, contact your property manager.
+          Create your account, then contact your property manager to be assigned
+          to your community and unit.
         </p>
       </div>
     </div>

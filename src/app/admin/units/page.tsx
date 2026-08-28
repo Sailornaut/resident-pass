@@ -3,7 +3,7 @@ import { createAdminSupabase } from "@/lib/db/client";
 import { resolveAdminCommunity } from "@/server/services/admin-context";
 import { Card, CardHeader, CardBody } from "@/components/ui/Card";
 import { CreateUnitForm } from "@/components/admin/CreateUnitForm";
-import { InviteResidentForm } from "@/components/admin/InviteResidentForm";
+import { AddResidentForm } from "@/components/admin/AddResidentForm";
 import { AllowanceGrantForm } from "@/components/admin/AllowanceGrantForm";
 import { formatDateTime } from "@/lib/format";
 import type { Membership, PassAllowanceGrant, Unit, User } from "@/lib/db/types";
@@ -61,11 +61,11 @@ export default async function AdminUnitsPage() {
 
       <Card>
         <CardHeader
-          title="Invite a resident"
-          subtitle="Create their account, email an invitation, and assign them to a unit"
+          title="Assign a resident"
+          subtitle="Assign an existing ResidentPass account to a unit"
         />
         <CardBody>
-          <InviteResidentForm communityId={community.id} units={allUnits} />
+          <AddResidentForm communityId={community.id} units={allUnits} />
         </CardBody>
       </Card>
 
@@ -131,7 +131,7 @@ export default async function AdminUnitsPage() {
       <Card>
         <CardHeader
           title={`Units (${allUnits.length})`}
-          subtitle="Residents are associated with units through invitations"
+          subtitle="Residents are associated with units by community administrators"
         />
         <CardBody>
           <div className="overflow-x-auto">

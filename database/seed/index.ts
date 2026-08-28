@@ -16,10 +16,22 @@
 
 import { createClient } from "@supabase/supabase-js";
 
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+
 const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  supabaseUrl,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
+
+const DEV_PASSWORD =
+  process.env.SEED_USER_PASSWORD ??
+  (/^https?:\/\/(localhost|127\.0\.0\.1)(:|\/)/.test(supabaseUrl)
+    ? "ResidentPass-E2E-2026!"
+    : undefined);
+
+if (!DEV_PASSWORD) {
+  throw new Error("SEED_USER_PASSWORD is required when seeding a hosted Supabase project.");
+}
 
 // ---- Deterministic record UUIDs for cross-reference ----
 // Auth user IDs are replaced at runtime with IDs returned by Supabase Auth.
@@ -109,11 +121,24 @@ async function seed() {
     if (!authUser) {
       const { data, error } = await supabase.auth.admin.createUser({
         email: seededUser.email,
+        password: DEV_PASSWORD,
         email_confirm: true,
         user_metadata: { full_name: seededUser.fullName },
       });
       if (error) throw error;
       if (!data.user) throw new Error(`Auth user was not created: ${seededUser.email}`);
+      authUser = data.user;
+    } else {
+      const { data, error } = await supabase.auth.admin.updateUserById(
+        authUser.id,
+        {
+          password: DEV_PASSWORD,
+          email_confirm: true,
+          user_metadata: { full_name: seededUser.fullName },
+        }
+      );
+      if (error) throw error;
+      if (!data.user) throw new Error(`Auth user was not updated: ${seededUser.email}`);
       authUser = data.user;
     }
 

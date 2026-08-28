@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
-import { inviteResidentAction } from "@/server/actions/admin-actions";
+import { addResidentAction } from "@/server/actions/admin-actions";
 import type { ActionState } from "@/server/actions/pass-actions";
 import type { Unit } from "@/lib/db/types";
 import { Button } from "@/components/ui/Button";
@@ -9,14 +9,14 @@ import { FormError, FormField, FormSuccess, inputClasses } from "@/components/ui
 
 const initialState: ActionState = { ok: false };
 
-export function InviteResidentForm({
+export function AddResidentForm({
   communityId,
   units,
 }: {
   communityId: string;
   units: Unit[];
 }) {
-  const action = inviteResidentAction.bind(null, communityId);
+  const action = addResidentAction.bind(null, communityId);
   const [state, formAction, pending] = useActionState(action, initialState);
 
   return (
@@ -86,7 +86,7 @@ export function InviteResidentForm({
       </div>
 
       <Button type="submit" disabled={pending || units.length === 0}>
-        {pending ? "Sending invitation…" : "Invite resident"}
+        {pending ? "Assigning resident…" : "Assign resident"}
       </Button>
     </form>
   );

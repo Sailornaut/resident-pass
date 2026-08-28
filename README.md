@@ -9,7 +9,7 @@ Built from the [MVP scaffold specification](docs/HOA_Temporary_Parking_Pass_MVP_
 ## Stack
 
 - **Next.js 15** (App Router, React Server Components, Server Actions)
-- **Supabase** — PostgreSQL, Auth (magic links), Row-Level Security
+- **Supabase** — PostgreSQL, email/password Auth, Row-Level Security
 - **Tailwind CSS 4**
 - **Zod** for validation, **qrcode** for QR generation, **Vitest** for tests
 
@@ -34,7 +34,9 @@ npm run db:seed
 npm run dev
 ```
 
-Open http://localhost:3000. Sign-in is passwordless — Supabase emails a magic link.
+Open http://localhost:3000. Local seeded accounts use the development password
+`ResidentPass-E2E-2026!`. New users can create an account from the sign-in page.
+Set `SEED_USER_PASSWORD` explicitly if you intentionally seed a hosted project.
 
 ## Project structure
 
@@ -45,7 +47,7 @@ src/
     verify/[code]/      Public QR verification (no login, minimal data)
     admin/              Community admin: dashboard, passes, units, rules
     platform/           Internal platform administration
-    auth/               Sign-in, magic-link callback, sign-out
+    auth/               Sign-in, signup profile completion, sign-out
     api/public/         Rate-limited public status endpoint
   components/           UI kit + resident/admin/pass components
   lib/

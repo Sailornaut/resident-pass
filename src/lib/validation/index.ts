@@ -52,7 +52,7 @@ export const createUnitSchema = z.object({
   address_label: z.string().trim().max(120).optional().or(z.literal("")),
 });
 
-export const inviteResidentSchema = z.object({
+export const addResidentSchema = z.object({
   email: z.string().trim().email("Enter a valid email address"),
   full_name: z.string().trim().max(80).optional().or(z.literal("")),
   unit_id: z.string().uuid("Select a unit"),
