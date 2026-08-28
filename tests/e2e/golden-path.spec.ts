@@ -281,6 +281,7 @@ test("an admin can assign an existing resident account to a unit", async ({ page
 });
 
 test("an admin can invite a new resident and reserve their unit", async ({
+  browser,
   page,
   request,
 }) => {
@@ -363,12 +364,21 @@ test("an admin can invite a new resident and reserve their unit", async ({
   const invitationLink = (message.Text as string).match(/https?:\/\/[^\s)]+/)?.[0];
   expect(invitationLink).toBeTruthy();
 
-  await page.goto(invitationLink!);
-  await expect(page).toHaveURL(/\/auth\/set-password$/);
-  await page.getByLabel("Password", { exact: true }).fill(E2E_PASSWORD);
-  await page.getByLabel("Confirm password").fill(E2E_PASSWORD);
-  await page.getByRole("button", { name: "Set password and continue" }).click();
-  await expect(page).toHaveURL(/\/dashboard$/);
+  // Reproduce the hosted fallback that exposed the regression: if Supabase
+  // returns an accepted invite to the app root, ResidentPass must preserve the
+  // invite session and route it to first-password setup instead of login.
+  const rootRedirectLink = new URL(invitationLink!);
+  rootRedirectLink.searchParams.set("redirect_to", APP_URL);
+  const inviteContext = await browser.newContext({ baseURL: APP_URL });
+  const invitePage = await inviteContext.newPage();
+  await invitePage.goto(rootRedirectLink.toString());
+  await expect(invitePage).toHaveURL(/\/auth\/set-password$/);
+  await invitePage.getByLabel("Password", { exact: true }).fill(E2E_PASSWORD);
+  await invitePage.getByLabel("Confirm password").fill(E2E_PASSWORD);
+  await invitePage
+    .getByRole("button", { name: "Set password and continue" })
+    .click();
+  await expect(invitePage).toHaveURL(/\/dashboard$/);
 
   const { data: activatedMembership, error: activationError } = await adminClient
     .from("memberships")
@@ -377,6 +387,7 @@ test("an admin can invite a new resident and reserve their unit", async ({
     .single();
   if (activationError) throw activationError;
   expect(activatedMembership.status).toBe("active");
+  await inviteContext.close();
 });
 
 test("a resident can create a password account without email confirmation", async ({ page }) => {

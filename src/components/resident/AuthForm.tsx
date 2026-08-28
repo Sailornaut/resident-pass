@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createBrowserClient } from "@supabase/ssr";
 import { Button } from "@/components/ui/Button";
 import { FormError, FormSuccess, inputClasses } from "@/components/ui/FormField";
@@ -78,10 +78,42 @@ export function AuthForm({ initialError }: AuthFormProps) {
     () =>
       createBrowserClient(
         process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+        { auth: { detectSessionInUrl: false } }
       ),
     []
   );
+
+  useEffect(() => {
+    async function routePendingInvitation() {
+      const fragment = new URLSearchParams(window.location.hash.slice(1));
+      const isInvite = fragment.get("type") === "invite";
+      const hasInviteSession =
+        fragment.has("access_token") && fragment.has("refresh_token");
+
+      if (isInvite && hasInviteSession) {
+        window.location.replace(`/auth/set-password${window.location.hash}`);
+        return;
+      }
+
+      // Supabase may already have consumed the fragment into browser cookies.
+      // Check the app membership so that accepted invitations cannot dead-end here.
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session) return;
+
+      const response = await fetch("/auth/invitation-status", {
+        cache: "no-store",
+      });
+      if (!response.ok) return;
+
+      const status = (await response.json()) as { pending?: boolean };
+      if (status.pending) window.location.replace("/auth/set-password");
+    }
+
+    void routePendingInvitation();
+  }, [supabase]);
 
   function switchMode(nextMode: AuthMode) {
     setMode(nextMode);
