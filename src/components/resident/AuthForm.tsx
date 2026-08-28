@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { createBrowserClient } from "@supabase/ssr";
 import { Button } from "@/components/ui/Button";
 import { FormError, FormSuccess, inputClasses } from "@/components/ui/FormField";
@@ -62,14 +62,26 @@ function validationMessage(
   return null;
 }
 
-export function AuthForm() {
+type AuthFormProps = {
+  initialError?: string;
+};
+
+export function AuthForm({ initialError }: AuthFormProps) {
   const [mode, setMode] = useState<AuthMode>("sign-in");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [passwordConfirmation, setPasswordConfirmation] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(initialError ?? null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [pending, setPending] = useState(false);
+  const [pending, setPending] = useState<"password" | "google" | null>(null);
+  const supabase = useMemo(
+    () =>
+      createBrowserClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+      ),
+    []
+  );
 
   function switchMode(nextMode: AuthMode) {
     setMode(nextMode);
@@ -104,11 +116,7 @@ export function AuthForm() {
       return;
     }
 
-    setPending(true);
-    const supabase = createBrowserClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-    );
+    setPending("password");
 
     if (mode === "sign-in") {
       const { error: authError } = await supabase.auth.signInWithPassword({
@@ -118,12 +126,12 @@ export function AuthForm() {
 
       if (authError) {
         setError(authErrorMessage(authError, mode));
-        setPending(false);
+        setPending(null);
         return;
       }
 
       if (await completeProfile()) window.location.assign("/");
-      setPending(false);
+      setPending(null);
       return;
     }
 
@@ -134,26 +142,45 @@ export function AuthForm() {
 
     if (authError) {
       setError(authErrorMessage(authError, mode));
-      setPending(false);
+      setPending(null);
       return;
     }
 
     if (!data.session) {
       if (data.user?.identities?.length === 0) {
         setError("An account already exists for this email. Sign in instead.");
-        setPending(false);
+        setPending(null);
         return;
       }
 
       setSuccess(
         "Account created. Email confirmation is required before you can sign in."
       );
-      setPending(false);
+      setPending(null);
       return;
     }
 
     if (await completeProfile()) window.location.assign("/");
-    setPending(false);
+    setPending(null);
+  }
+
+  async function handleGoogleSignIn() {
+    setError(null);
+    setSuccess(null);
+    setPending("google");
+
+    const { error: authError } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: `${window.location.origin}/auth/oauth/callback`,
+        queryParams: { prompt: "select_account" },
+      },
+    });
+
+    if (authError) {
+      setError("Could not start Google sign-in. Please try again.");
+      setPending(null);
+    }
   }
 
   return (
@@ -181,6 +208,31 @@ export function AuthForm() {
         >
           Create account
         </button>
+      </div>
+
+      <Button
+        type="button"
+        variant="secondary"
+        size="lg"
+        className="w-full"
+        onClick={handleGoogleSignIn}
+        disabled={pending !== null}
+      >
+        <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5">
+          <path fill="#4285F4" d="M21.6 12.23c0-.71-.06-1.4-.18-2.07H12v3.92h5.38a4.6 4.6 0 0 1-2 3.02v2.54h3.24c1.9-1.75 2.98-4.33 2.98-7.41Z" />
+          <path fill="#34A853" d="M12 22c2.7 0 4.98-.9 6.63-2.36l-3.24-2.54c-.9.6-2.05.96-3.39.96-2.61 0-4.82-1.76-5.61-4.13H3.04v2.62A10 10 0 0 0 12 22Z" />
+          <path fill="#FBBC05" d="M6.39 13.93A6.02 6.02 0 0 1 6.07 12c0-.67.12-1.32.32-1.93V7.45H3.04A10 10 0 0 0 2 12c0 1.64.39 3.19 1.04 4.55l3.35-2.62Z" />
+          <path fill="#EA4335" d="M12 5.94c1.47 0 2.79.5 3.83 1.5l2.87-2.87A9.62 9.62 0 0 0 12 2a10 10 0 0 0-8.96 5.45l3.35 2.62C7.18 7.7 9.39 5.94 12 5.94Z" />
+        </svg>
+        {pending === "google" ? "Opening Google…" : "Continue with Google"}
+      </Button>
+
+      <div className="my-5 flex items-center gap-3" aria-hidden="true">
+        <div className="h-px flex-1 bg-gray-200" />
+        <span className="text-xs font-medium uppercase tracking-wide text-gray-400">
+          or continue with email
+        </span>
+        <div className="h-px flex-1 bg-gray-200" />
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-4">
@@ -243,8 +295,8 @@ export function AuthForm() {
           </div>
         )}
 
-        <Button type="submit" size="lg" className="w-full" disabled={pending}>
-          {pending
+        <Button type="submit" size="lg" className="w-full" disabled={pending !== null}>
+          {pending === "password"
             ? mode === "sign-in" ? "Signing in…" : "Creating account…"
             : mode === "sign-in" ? "Sign in" : "Create account"}
         </Button>

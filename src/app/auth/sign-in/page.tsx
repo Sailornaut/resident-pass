@@ -2,7 +2,18 @@ import { AuthForm } from "@/components/resident/AuthForm";
 
 export const metadata = { title: "Sign In" };
 
-export default function SignInPage() {
+type SignInPageProps = {
+  searchParams: Promise<{ auth_error?: string }>;
+};
+
+export default async function SignInPage({ searchParams }: SignInPageProps) {
+  const { auth_error: authError } = await searchParams;
+  const initialError = authError
+    ? authError === "profile"
+      ? "You are signed in, but we could not finish setting up your account. Please try again."
+      : "Google sign-in could not be completed. Please try again."
+    : undefined;
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
       <div className="w-full max-w-sm space-y-6">
@@ -17,7 +28,7 @@ export default function SignInPage() {
             Manage your guest parking passes
           </p>
         </div>
-        <AuthForm />
+        <AuthForm initialError={initialError} />
         <p className="text-center text-xs text-gray-400">
           Create your account, then contact your property manager to be assigned
           to your community and unit.

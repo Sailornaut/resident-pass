@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { createAdminSupabase, createServerSupabase } from "@/lib/db/client";
+import { createServerSupabase } from "@/lib/db/client";
+import { completeAppUserProfile } from "@/server/services/auth-service";
 
 /** Ensure an authenticated Supabase user has the app-level profile row it needs. */
 export async function POST() {
@@ -12,33 +13,15 @@ export async function POST() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const admin = createAdminSupabase();
-  const { error } = await admin.from("users").upsert(
-    {
-      id: user.id,
-      email: user.email.toLowerCase(),
-      full_name: user.user_metadata?.full_name ?? null,
-      status: "active",
-    },
-    { onConflict: "id", ignoreDuplicates: true }
-  );
-
-  if (error) {
+  const result = await completeAppUserProfile(user);
+  if (!result.ok) {
     return NextResponse.json(
-      { error: "Could not complete account setup" },
-      { status: 500 }
-    );
-  }
-
-  const { error: membershipError } = await admin
-    .from("memberships")
-    .update({ status: "active" })
-    .eq("user_id", user.id)
-    .eq("status", "invited");
-
-  if (membershipError) {
-    return NextResponse.json(
-      { error: "Could not activate account memberships" },
+      {
+        error:
+          result.error === "memberships"
+            ? "Could not activate account memberships"
+            : "Could not complete account setup",
+      },
       { status: 500 }
     );
   }
