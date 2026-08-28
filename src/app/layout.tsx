@@ -15,7 +15,12 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body className="antialiased">{children}</body>
+      <body className="antialiased">
+        {children}
+        <p className="no-print pointer-events-none fixed bottom-3 left-3 z-50 select-none text-xs font-medium text-slate-500/45">
+          ResidentPass by TrafficScout
+        </p>
+      </body>
     </html>
   );
 }
