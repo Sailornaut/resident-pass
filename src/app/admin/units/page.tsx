@@ -3,6 +3,7 @@ import { createAdminSupabase } from "@/lib/db/client";
 import { resolveAdminCommunity } from "@/server/services/admin-context";
 import { Card, CardHeader, CardBody } from "@/components/ui/Card";
 import { CreateUnitForm } from "@/components/admin/CreateUnitForm";
+import { InviteResidentForm } from "@/components/admin/InviteResidentForm";
 import { AllowanceGrantForm } from "@/components/admin/AllowanceGrantForm";
 import { formatDateTime } from "@/lib/format";
 import type { Membership, PassAllowanceGrant, Unit, User } from "@/lib/db/types";
@@ -55,6 +56,16 @@ export default async function AdminUnitsPage() {
         <CardHeader title="Add a unit" />
         <CardBody>
           <CreateUnitForm communityId={community.id} />
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHeader
+          title="Invite a resident"
+          subtitle="Create their account, email an invitation, and assign them to a unit"
+        />
+        <CardBody>
+          <InviteResidentForm communityId={community.id} units={allUnits} />
         </CardBody>
       </Card>
 

@@ -4,6 +4,7 @@ import { expect, test, type APIRequestContext, type Page } from "@playwright/tes
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 const MAILPIT_URL = "http://127.0.0.1:54324";
 const E2E_PLATE = "E2E1234";
+const INVITED_EMAIL = "e2e.invited@example.com";
 
 const adminClient = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -74,6 +75,15 @@ test.beforeEach(async () => {
   ]);
   if (passError) throw passError;
   if (grantError) throw grantError;
+});
+
+test.afterAll(async () => {
+  const { data } = await adminClient.auth.admin.listUsers({ page: 1, perPage: 1000 });
+  const invitedUser = data.users.find((user) => user.email === INVITED_EMAIL);
+  if (invitedUser) {
+    await adminClient.from("users").delete().eq("id", invitedUser.id);
+    await adminClient.auth.admin.deleteUser(invitedUser.id);
+  }
 });
 
 test("resident issues a pass, enforcement verifies it, and admin revokes it", async ({
@@ -254,4 +264,39 @@ test("an Oak Ridge admin cannot access a Pine Creek pass", async ({ page, reques
 
   const response = await page.goto(`/admin/passes/${pinePass.id}`);
   expect(response?.status()).toBe(404);
+});
+
+test("an admin can invite a resident and assign a unit", async ({ page, request }) => {
+  await signInWithMagicLink(
+    page,
+    request,
+    "admin@oakridge.example.com",
+    /\/admin\/dashboard$/
+  );
+
+  await page.goto("/admin/units");
+  await page.getByLabel("Resident email").fill(INVITED_EMAIL);
+  await page.getByLabel("Resident name").fill("E2E Invited Resident");
+  await page.locator("#resident_unit_id").selectOption({ label: "104 — 100 Oak Ridge Dr, Unit 104" });
+  await page.getByRole("button", { name: "Invite resident" }).click();
+
+  await expect(page.getByText(`Invitation sent to ${INVITED_EMAIL}.`)).toBeVisible();
+
+  const { data: invitedUser, error: userError } = await adminClient
+    .from("users")
+    .select("id")
+    .eq("email", INVITED_EMAIL)
+    .single();
+  if (userError) throw userError;
+
+  const { data: membership, error: membershipError } = await adminClient
+    .from("memberships")
+    .select("role, status, units(unit_label)")
+    .eq("user_id", invitedUser.id)
+    .single();
+  if (membershipError) throw membershipError;
+
+  expect(membership.role).toBe("resident");
+  expect(membership.status).toBe("active");
+  expect((membership.units as unknown as { unit_label: string }).unit_label).toBe("104");
 });

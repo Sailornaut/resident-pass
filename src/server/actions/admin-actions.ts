@@ -92,8 +92,8 @@ export async function createUnitAction(
     return { ok: false, errors: flattenErrors(parsed.error) };
   }
 
-  const supabase = await createServerSupabase();
-  const { error } = await supabase.from("units").insert({
+  const admin = createAdminSupabase();
+  const { error } = await admin.from("units").insert({
     community_id: communityId,
     unit_label: parsed.data.unit_label,
     address_label: parsed.data.address_label || null,
@@ -184,8 +184,6 @@ export async function inviteResidentAction(
     return { ok: false, errors: flattenErrors(parsed.error) };
   }
 
-  // MVP: create an invited membership; transactional email wiring comes
-  // in pilot hardening. The invited user completes signup via magic link.
   const supabase = await createServerSupabase();
 
   // Verify the target unit actually belongs to this community (tenant isolation).
@@ -200,9 +198,74 @@ export async function inviteResidentAction(
     return { ok: false, message: "That unit does not belong to this community." };
   }
 
-  // TODO(pilot): send invitation email via Supabase Auth admin.inviteUserByEmail
+  const admin = createAdminSupabase();
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "");
+  if (!appUrl) {
+    return { ok: false, message: "The application URL is not configured." };
+  }
+
+  const email = parsed.data.email.toLowerCase();
+  const { data: inviteData, error: inviteError } =
+    await admin.auth.admin.inviteUserByEmail(email, {
+      data: parsed.data.full_name
+        ? { full_name: parsed.data.full_name }
+        : undefined,
+      redirectTo: `${appUrl}/auth/sign-in?invited=1`,
+    });
+
+  let authUser = inviteData.user;
+
+  // Retrying an invitation for an existing Auth identity should repair the
+  // app profile/membership instead of leaving the admin stuck.
+  if (inviteError || !authUser) {
+    const { data: existingUsers, error: listError } =
+      await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+    if (listError) {
+      return { ok: false, message: "Could not create the resident account." };
+    }
+    authUser = existingUsers.users.find(
+      (candidate) => candidate.email?.toLowerCase() === email
+    ) ?? null;
+  }
+
+  if (!authUser) {
+    return { ok: false, message: "Could not send the resident invitation." };
+  }
+
+  const { error: userError } = await admin.from("users").upsert(
+    {
+      id: authUser.id,
+      email,
+      full_name: parsed.data.full_name || null,
+      status: "active",
+    },
+    { onConflict: "id" }
+  );
+
+  if (userError) {
+    return { ok: false, message: "The invitation was sent, but the resident profile could not be saved." };
+  }
+
+  const { error: membershipError } = await admin.from("memberships").upsert(
+    {
+      user_id: authUser.id,
+      community_id: communityId,
+      unit_id: parsed.data.unit_id,
+      role: "resident",
+      status: "active",
+    },
+    { onConflict: "user_id,community_id,role" }
+  );
+
+  if (membershipError) {
+    return { ok: false, message: "The invitation was sent, but the unit assignment could not be saved." };
+  }
+
+  revalidatePath("/admin/units");
   return {
     ok: true,
-    message: `Invitation prepared for ${parsed.data.email}. Email delivery is wired up during pilot hardening.`,
+    message: inviteError
+      ? `${email} was already registered and is now assigned to the selected unit.`
+      : `Invitation sent to ${email}.`,
   };
 }

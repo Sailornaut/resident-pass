@@ -1,4 +1,4 @@
--- ResidentPass MVP Schema
+-- ResidentPass production schema
 -- Multi-tenant parking pass platform
 
 -- Enable UUID generation
