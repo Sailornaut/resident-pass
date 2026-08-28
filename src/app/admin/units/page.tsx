@@ -39,6 +39,9 @@ export default async function AdminUnitsPage() {
     users: Pick<User, "full_name" | "email">;
   };
   const residentMemberships = (memberships ?? []) as ResidentMembership[];
+  const activeResidentMemberships = residentMemberships.filter(
+    (resident) => resident.status === "active"
+  );
   const activeGrants = (allowanceGrants ?? []) as PassAllowanceGrant[];
   const residentsByUnit = new Map<string, ResidentMembership[]>();
   for (const m of residentMemberships) {
@@ -61,8 +64,8 @@ export default async function AdminUnitsPage() {
 
       <Card>
         <CardHeader
-          title="Assign a resident"
-          subtitle="Assign an existing ResidentPass account to a unit"
+          title="Assign or invite a resident"
+          subtitle="Assign an existing account, or email a new resident an account invitation"
         />
         <CardBody>
           <AddResidentForm communityId={community.id} units={allUnits} />
@@ -76,7 +79,7 @@ export default async function AdminUnitsPage() {
         />
         <CardBody>
           <div className="grid gap-4 lg:grid-cols-2">
-            {residentMemberships.map((resident) => {
+            {activeResidentMemberships.map((resident) => {
               const unit = allUnits.find((candidate) => candidate.id === resident.unit_id);
               const residentName = resident.users?.full_name ?? resident.users?.email;
               const grants = activeGrants.filter(
@@ -159,8 +162,11 @@ export default async function AdminUnitsPage() {
                         {residents.length === 0 ? (
                           <span className="text-gray-400">No residents</span>
                         ) : (
-                          residents
-                            .map((r) => r.users?.full_name ?? r.users?.email)
+                            residents
+                            .map((r) => {
+                              const name = r.users?.full_name ?? r.users?.email;
+                              return r.status === "invited" ? `${name} (invited)` : name;
+                            })
                             .join(", ")
                         )}
                       </td>

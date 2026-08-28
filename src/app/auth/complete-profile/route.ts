@@ -30,5 +30,18 @@ export async function POST() {
     );
   }
 
+  const { error: membershipError } = await admin
+    .from("memberships")
+    .update({ status: "active" })
+    .eq("user_id", user.id)
+    .eq("status", "invited");
+
+  if (membershipError) {
+    return NextResponse.json(
+      { error: "Could not activate account memberships" },
+      { status: 500 }
+    );
+  }
+
   return NextResponse.json({ ok: true });
 }

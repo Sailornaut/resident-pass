@@ -86,7 +86,7 @@ export function AddResidentForm({
       </div>
 
       <Button type="submit" disabled={pending || units.length === 0}>
-        {pending ? "Assigning resident…" : "Assign resident"}
+        {pending ? "Assigning resident…" : "Assign or invite resident"}
       </Button>
     </form>
   );

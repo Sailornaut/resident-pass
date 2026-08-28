@@ -5,7 +5,9 @@ const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 const E2E_PASSWORD = "ResidentPass-E2E-2026!";
 const E2E_PLATE = "E2E1234";
 const ASSIGNED_EMAIL = "e2e.assigned@example.com";
+const INVITED_EMAIL = "e2e.invited@example.com";
 const SIGNUP_EMAIL = "e2e.signup@example.com";
+const MAILPIT_URL = "http://127.0.0.1:54324";
 
 const adminClient = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -45,7 +47,7 @@ test.beforeEach(async () => {
 test.afterAll(async () => {
   const { data } = await adminClient.auth.admin.listUsers({ page: 1, perPage: 1000 });
   const removableUsers = data.users.filter((user) =>
-    [ASSIGNED_EMAIL, SIGNUP_EMAIL].includes(user.email ?? "")
+    [ASSIGNED_EMAIL, INVITED_EMAIL, SIGNUP_EMAIL].includes(user.email ?? "")
   );
   for (const user of removableUsers) {
     await adminClient.from("users").delete().eq("id", user.id);
@@ -253,7 +255,7 @@ test("an admin can assign an existing resident account to a unit", async ({ page
   await page.getByLabel("Resident email").fill(ASSIGNED_EMAIL);
   await page.getByLabel("Resident name").fill("E2E Assigned Resident");
   await page.locator("#resident_unit_id").selectOption({ label: "104 — 100 Oak Ridge Dr, Unit 104" });
-  await page.getByRole("button", { name: "Assign resident" }).click();
+  await page.getByRole("button", { name: "Assign or invite resident" }).click();
 
   await expect(
     page.getByText(`${ASSIGNED_EMAIL} is now assigned to the selected unit.`)
@@ -276,6 +278,105 @@ test("an admin can assign an existing resident account to a unit", async ({ page
   expect(membership.role).toBe("resident");
   expect(membership.status).toBe("active");
   expect((membership.units as unknown as { unit_label: string }).unit_label).toBe("104");
+});
+
+test("an admin can invite a new resident and reserve their unit", async ({
+  page,
+  request,
+}) => {
+  const { data: existingUsers } = await adminClient.auth.admin.listUsers({
+    page: 1,
+    perPage: 1000,
+  });
+  const oldUser = existingUsers.users.find((user) => user.email === INVITED_EMAIL);
+  if (oldUser) {
+    await adminClient.from("users").delete().eq("id", oldUser.id);
+    await adminClient.auth.admin.deleteUser(oldUser.id);
+  }
+
+  const inboxBefore = await request.get(`${MAILPIT_URL}/api/v1/messages`);
+  expect(inboxBefore.ok()).toBeTruthy();
+  const existingMessageIds = new Set<string>(
+    ((await inboxBefore.json()).messages ?? []).map(
+      (message: { ID: string }) => message.ID
+    )
+  );
+
+  await signInWithPassword(
+    page,
+    "admin@oakridge.example.com",
+    /\/admin\/dashboard$/
+  );
+  await page.goto("/admin/units");
+  await page.getByLabel("Resident email").fill(INVITED_EMAIL);
+  await page.getByLabel("Resident name").fill("E2E Invited Resident");
+  await page.locator("#resident_unit_id").selectOption({
+    label: "104 — 100 Oak Ridge Dr, Unit 104",
+  });
+  await page
+    .getByRole("button", { name: "Assign or invite resident" })
+    .click();
+
+  await expect(
+    page.getByText(
+      `Invitation sent to ${INVITED_EMAIL}. The selected unit is reserved until account setup is complete.`
+    )
+  ).toBeVisible();
+
+  const { data: invitedProfile, error: profileError } = await adminClient
+    .from("users")
+    .select("id")
+    .eq("email", INVITED_EMAIL)
+    .single();
+  if (profileError) throw profileError;
+
+  const { data: invitedMembership, error: membershipError } = await adminClient
+    .from("memberships")
+    .select("status, units(unit_label)")
+    .eq("user_id", invitedProfile.id)
+    .single();
+  if (membershipError) throw membershipError;
+  expect(invitedMembership.status).toBe("invited");
+  expect(
+    (invitedMembership.units as unknown as { unit_label: string }).unit_label
+  ).toBe("104");
+
+  let messageId: string | undefined;
+  await expect
+    .poll(async () => {
+      const response = await request.get(`${MAILPIT_URL}/api/v1/messages`);
+      const inbox = await response.json();
+      const message = (inbox.messages ?? []).find(
+        (candidate: { ID: string; To: Array<{ Address: string }> }) =>
+          !existingMessageIds.has(candidate.ID) &&
+          candidate.To.some((recipient) => recipient.Address === INVITED_EMAIL)
+      );
+      messageId = message?.ID;
+      return Boolean(messageId);
+    })
+    .toBe(true);
+
+  const messageResponse = await request.get(
+    `${MAILPIT_URL}/api/v1/message/${messageId}`
+  );
+  const message = await messageResponse.json();
+  const invitationLink = (message.Text as string).match(/https?:\/\/[^\s)]+/)?.[0];
+  expect(invitationLink).toBeTruthy();
+
+  await page.goto(invitationLink!);
+  await expect(page).toHaveURL(/\/auth\/set-password$/);
+  await page.getByLabel("Password", { exact: true }).fill(E2E_PASSWORD);
+  await page.getByLabel("Confirm password").fill(E2E_PASSWORD);
+  await page.getByRole("button", { name: "Set password and continue" }).click();
+  await expect(page).toHaveURL(/\/dashboard$/);
+
+  const { data: activatedMembership, error: activationError } = await adminClient
+    .from("memberships")
+    .select("status")
+    .eq("user_id", invitedProfile.id)
+    .single();
+  if (activationError) throw activationError;
+  expect(activatedMembership.status).toBe("active");
 });
 
 test("a resident can create a password account without email confirmation", async ({ page }) => {

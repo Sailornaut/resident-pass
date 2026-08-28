@@ -205,28 +205,61 @@ export async function addResidentAction(
   if (listError) {
     return { ok: false, message: "Could not look up the resident account." };
   }
-  const authUser = existingUsers.users.find(
+  let authUser = existingUsers.users.find(
     (candidate) => candidate.email?.toLowerCase() === email
   );
+  let invitationSent = false;
 
   if (!authUser) {
-    return {
-      ok: false,
-      message: "No account was found for that email. Ask the resident to create an account first.",
-    };
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "");
+    if (!appUrl) {
+      return { ok: false, message: "The application URL is not configured." };
+    }
+
+    const { data: inviteData, error: inviteError } =
+      await admin.auth.admin.inviteUserByEmail(email, {
+        data: parsed.data.full_name
+          ? { full_name: parsed.data.full_name }
+          : undefined,
+        redirectTo: `${appUrl}/auth/set-password`,
+      });
+
+    if (inviteError || !inviteData.user) {
+      const message = inviteError?.status === 429
+        ? "Too many invitations were sent recently. Please wait and try again."
+        : "Could not send the account invitation. Check the email address and email configuration.";
+      return { ok: false, message };
+    }
+
+    authUser = inviteData.user;
+    invitationSent = true;
   }
+
+  const { data: currentMembership, error: membershipLookupError } = await admin
+    .from("memberships")
+    .select("status")
+    .eq("user_id", authUser.id)
+    .eq("community_id", communityId)
+    .eq("role", "resident")
+    .maybeSingle();
+  if (membershipLookupError) {
+    if (invitationSent) await admin.auth.admin.deleteUser(authUser.id);
+    return { ok: false, message: "Could not check the resident's current assignment." };
+  }
+  const invitationPending = currentMembership?.status === "invited";
 
   const { error: userError } = await admin.from("users").upsert(
     {
       id: authUser.id,
       email,
-      full_name: parsed.data.full_name || null,
+      ...(parsed.data.full_name ? { full_name: parsed.data.full_name } : {}),
       status: "active",
     },
     { onConflict: "id" }
   );
 
   if (userError) {
+    if (invitationSent) await admin.auth.admin.deleteUser(authUser.id);
     return { ok: false, message: "The resident profile could not be saved." };
   }
 
@@ -236,18 +269,26 @@ export async function addResidentAction(
       community_id: communityId,
       unit_id: parsed.data.unit_id,
       role: "resident",
-      status: "active",
+      status: invitationSent || invitationPending ? "invited" : "active",
     },
     { onConflict: "user_id,community_id,role" }
   );
 
   if (membershipError) {
+    if (invitationSent) {
+      await admin.from("users").delete().eq("id", authUser.id);
+      await admin.auth.admin.deleteUser(authUser.id);
+    }
     return { ok: false, message: "The unit assignment could not be saved." };
   }
 
   revalidatePath("/admin/units");
   return {
     ok: true,
-    message: `${email} is now assigned to the selected unit.`,
+    message: invitationSent
+      ? `Invitation sent to ${email}. The selected unit is reserved until account setup is complete.`
+      : invitationPending
+        ? `${email} already has a pending invitation. The selected unit remains reserved.`
+      : `${email} is now assigned to the selected unit.`,
   };
 }
