@@ -5,6 +5,31 @@ import { createBrowserClient } from "@supabase/ssr";
 import { Button } from "@/components/ui/Button";
 import { FormError, FormSuccess, inputClasses } from "@/components/ui/FormField";
 
+type AuthErrorLike = {
+  code?: string;
+  status?: number;
+};
+
+export function signInErrorMessage(authError: AuthErrorLike): string {
+  if (
+    authError.status === 429 ||
+    authError.code === "over_email_send_rate_limit" ||
+    authError.code === "over_request_rate_limit"
+  ) {
+    return "Too many sign-in emails were requested. Please wait and try again later.";
+  }
+
+  if (authError.code === "email_address_invalid") {
+    return "Enter a valid email address.";
+  }
+
+  if (authError.code === "user_not_found") {
+    return "No invited account was found for that email address.";
+  }
+
+  return "Could not send the sign-in link. Please try again later.";
+}
+
 /**
  * Passwordless (magic link) sign-in. Supabase emails a one-time link;
  * the /auth/callback route exchanges it for a session.
@@ -28,13 +53,14 @@ export function SignInForm() {
     const { error: authError } = await supabase.auth.signInWithOtp({
       email,
       options: {
+        shouldCreateUser: false,
         emailRedirectTo: `${window.location.origin}/auth/callback`,
       },
     });
 
     setPending(false);
     if (authError) {
-      setError("Could not send the sign-in link. Check the address and try again.");
+      setError(signInErrorMessage(authError));
     } else {
       setSent(true);
     }
