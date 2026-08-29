@@ -1,10 +1,11 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { configuredAppUrl } from "@/lib/app-url";
 import { createServerSupabase } from "@/lib/db/client";
 import { completeAppUserProfile } from "@/server/services/auth-service";
 
 function appUrl(request: NextRequest): string {
-  return configuredAppUrl(request.nextUrl.origin);
+  // Return to the host that initiated OAuth so the session cookies written by
+  // this callback remain available after the redirect.
+  return request.nextUrl.origin;
 }
 
 function authErrorRedirect(request: NextRequest, reason: string) {
