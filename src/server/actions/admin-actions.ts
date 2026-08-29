@@ -5,6 +5,7 @@
  */
 
 import { revalidatePath } from "next/cache";
+import { normalizeAppUrl } from "@/lib/app-url";
 import { requireAuthorizedContext } from "@/lib/auth";
 import { requireAdminOf } from "@/lib/permissions";
 import { createAdminSupabase, createServerSupabase } from "@/lib/db/client";
@@ -211,10 +212,11 @@ export async function addResidentAction(
   let invitationSent = false;
 
   if (!authUser) {
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "");
-    if (!appUrl) {
+    const configuredUrl = process.env.NEXT_PUBLIC_APP_URL;
+    if (!configuredUrl) {
       return { ok: false, message: "The application URL is not configured." };
     }
+    const appUrl = normalizeAppUrl(configuredUrl);
 
     const { data: inviteData, error: inviteError } =
       await admin.auth.admin.inviteUserByEmail(email, {

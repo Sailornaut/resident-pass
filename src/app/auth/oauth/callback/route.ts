@@ -1,12 +1,10 @@
 import { type NextRequest, NextResponse } from "next/server";
+import { configuredAppUrl } from "@/lib/app-url";
 import { createServerSupabase } from "@/lib/db/client";
 import { completeAppUserProfile } from "@/server/services/auth-service";
 
 function appUrl(request: NextRequest): string {
-  return (process.env.NEXT_PUBLIC_APP_URL ?? request.nextUrl.origin).replace(
-    /\/$/,
-    ""
-  );
+  return configuredAppUrl(request.nextUrl.origin);
 }
 
 function authErrorRedirect(request: NextRequest, reason: string) {

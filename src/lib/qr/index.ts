@@ -1,4 +1,5 @@
 import QRCode from "qrcode";
+import { configuredAppUrl } from "@/lib/app-url";
 
 export { generatePassCode, normalizePassCode, isValidPassCodeFormat } from "./pass-code";
 
@@ -7,7 +8,7 @@ export { generatePassCode, normalizePassCode, isValidPassCodeFormat } from "./pa
  * The QR payload contains ONLY the public code — never resident data.
  */
 export function verificationUrl(publicCode: string): string {
-  const base = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+  const base = configuredAppUrl();
   return `${base}/verify/${encodeURIComponent(publicCode)}`;
 }
 
