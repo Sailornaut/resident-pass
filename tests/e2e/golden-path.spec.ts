@@ -3,10 +3,11 @@ import { expect, test, type Page } from "@playwright/test";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 const E2E_PASSWORD = "ResidentPass-E2E-2026!";
+const RECOVERY_PASSWORD = "ResidentPass-Recovered-2026!";
 const E2E_PLATE = "E2E1234";
 const ASSIGNED_EMAIL = "e2e.assigned@example.com";
 const INVITED_EMAIL = "e2e.invited@example.com";
-const SIGNUP_EMAIL = "e2e.signup@example.com";
+const UNLINKED_EMAIL = "e2e.unlinked@example.com";
 const MAILPIT_URL = "http://127.0.0.1:54324";
 
 const adminClient = createClient(
@@ -33,21 +34,23 @@ function toDateTimeLocal(date: Date): string {
 }
 
 test.beforeEach(async () => {
-  const [{ error: passError }, { error: grantError }] = await Promise.all([
+  const [{ error: passError }, { error: grantError }, { error: requestError }] = await Promise.all([
     adminClient.from("parking_passes").delete().like("plate", "E2E%"),
     adminClient
       .from("pass_allowance_grants")
       .delete()
       .eq("reason", "Automated E2E allowance"),
+    adminClient.from("user_access_requests").delete().eq("email", UNLINKED_EMAIL),
   ]);
   if (passError) throw passError;
   if (grantError) throw grantError;
+  if (requestError) throw requestError;
 });
 
 test.afterAll(async () => {
   const { data } = await adminClient.auth.admin.listUsers({ page: 1, perPage: 1000 });
   const removableUsers = data.users.filter((user) =>
-    [ASSIGNED_EMAIL, INVITED_EMAIL, SIGNUP_EMAIL].includes(user.email ?? "")
+    [ASSIGNED_EMAIL, INVITED_EMAIL, UNLINKED_EMAIL].includes(user.email ?? "")
   );
   for (const user of removableUsers) {
     await adminClient.from("users").delete().eq("id", user.id);
@@ -258,7 +261,9 @@ test("an admin can assign an existing resident account to a unit", async ({ page
   await page.getByRole("button", { name: "Assign or invite resident" }).click();
 
   await expect(
-    page.getByText(`${ASSIGNED_EMAIL} is now assigned to the selected unit.`)
+    page.getByText(
+      `${ASSIGNED_EMAIL} is now assigned to the selected unit. If they do not know their password, they can reset it from the sign-in page.`
+    )
   ).toBeVisible();
 
   const { data: assignedUser, error: userError } = await adminClient
@@ -390,34 +395,133 @@ test("an admin can invite a new resident and reserve their unit", async ({
   await inviteContext.close();
 });
 
-test("a resident can create a password account without email confirmation", async ({ page }) => {
+test("a public account request reaches the admin inbox without creating access", async ({
+  browser,
+  page,
+}) => {
   const { data: existingUsers } = await adminClient.auth.admin.listUsers({
     page: 1,
     perPage: 1000,
   });
-  const oldUser = existingUsers.users.find((user) => user.email === SIGNUP_EMAIL);
+  const oldUser = existingUsers.users.find((user) => user.email === UNLINKED_EMAIL);
   if (oldUser) {
     await adminClient.from("users").delete().eq("id", oldUser.id);
     await adminClient.auth.admin.deleteUser(oldUser.id);
   }
 
   await page.goto("/auth/sign-in");
-  await page.getByRole("tab", { name: "Create account" }).click();
-  await page.getByLabel("Email address").fill(SIGNUP_EMAIL);
-  await page.getByLabel("Password", { exact: true }).fill(E2E_PASSWORD);
-  await page.getByLabel("Confirm password").fill(E2E_PASSWORD);
-  await page.getByRole("button", { name: "Create account", exact: true }).click();
-
-  await expect(page).toHaveURL(/\/dashboard$/);
+  await expect(page.getByRole("tab", { name: "Create account" })).toHaveCount(0);
+  await page.getByRole("tab", { name: "Request account" }).click();
+  await page.getByLabel("Name").fill("E2E Requesting Resident");
+  await page.getByLabel("Email").fill(UNLINKED_EMAIL);
+  await page.getByLabel("Unit address").fill("100 Oak Ridge Dr, Unit 301");
+  await page.getByLabel("Community").selectOption({ label: "Oak Ridge Condominiums" });
+  await page.getByRole("button", { name: "Request access" }).click();
   await expect(
-    page.getByRole("heading", { name: "No residence linked to your account" })
+    page.getByText("Your request was sent to the Oak Ridge Condominiums administrators.")
   ).toBeVisible();
 
-  const { data: profile, error: profileError } = await adminClient
-    .from("users")
-    .select("email, status")
-    .eq("email", SIGNUP_EMAIL)
+  const { data: usersAfterRequest } = await adminClient.auth.admin.listUsers({
+    page: 1,
+    perPage: 1000,
+  });
+  expect(usersAfterRequest.users.some((user) => user.email === UNLINKED_EMAIL)).toBe(false);
+
+  const { data: pendingRequest, error: pendingRequestError } = await adminClient
+    .from("user_access_requests")
+    .select("id, requester_user_id, status")
+    .eq("email", UNLINKED_EMAIL)
     .single();
-  if (profileError) throw profileError;
-  expect(profile.status).toBe("active");
+  if (pendingRequestError) throw pendingRequestError;
+  expect(pendingRequest.requester_user_id).toBeNull();
+  expect(pendingRequest.status).toBe("pending");
+
+  const { error: createError } = await adminClient.auth.admin.createUser({
+    email: UNLINKED_EMAIL,
+    password: E2E_PASSWORD,
+    email_confirm: true,
+  });
+  if (createError) throw createError;
+
+  const adminContext = await browser.newContext({ baseURL: APP_URL });
+  const adminPage = await adminContext.newPage();
+  await signInWithPassword(
+    adminPage,
+    "admin@oakridge.example.com",
+    /\/admin\/dashboard$/
+  );
+  await adminPage.getByLabel("1 pending user request").click();
+  await expect(adminPage).toHaveURL(/\/admin\/user-requests$/);
+  await expect(adminPage.getByText(UNLINKED_EMAIL)).toBeVisible();
+  await expect(adminPage.getByText("100 Oak Ridge Dr, Unit 301")).toBeVisible();
+
+  await adminPage.getByRole("link", { name: "Manage residents" }).click();
+  await adminPage.getByLabel("Resident email").fill(UNLINKED_EMAIL);
+  await adminPage.getByLabel("Resident name").fill("E2E Requesting Resident");
+  await adminPage.locator("#resident_unit_id").selectOption({
+    label: "301 — 100 Oak Ridge Dr, Unit 301",
+  });
+  await adminPage.getByRole("button", { name: "Assign or invite resident" }).click();
+
+  const { data: approvedRequest, error: requestError } = await adminClient
+    .from("user_access_requests")
+    .select("status, requester_user_id")
+    .eq("email", UNLINKED_EMAIL)
+    .single();
+  if (requestError) throw requestError;
+  expect(approvedRequest.status).toBe("approved");
+  expect(approvedRequest.requester_user_id).not.toBeNull();
+  await adminContext.close();
+});
+
+test("an existing user can establish a password through recovery", async ({
+  page,
+  request,
+}) => {
+  const recoveryEmail = "drew.nguyen@example.com";
+  const inboxBefore = await request.get(`${MAILPIT_URL}/api/v1/messages`);
+  expect(inboxBefore.ok()).toBeTruthy();
+  const existingMessageIds = new Set<string>(
+    ((await inboxBefore.json()).messages ?? []).map(
+      (message: { ID: string }) => message.ID
+    )
+  );
+
+  await page.goto("/auth/sign-in");
+  await page.getByLabel("Email address").fill(recoveryEmail);
+  await page.getByRole("button", { name: "Forgot or need a password?" }).click();
+  await expect(
+    page.getByText(
+      "If that email has a ResidentPass account, a password setup link is on its way."
+    )
+  ).toBeVisible();
+
+  let messageId: string | undefined;
+  await expect
+    .poll(async () => {
+      const response = await request.get(`${MAILPIT_URL}/api/v1/messages`);
+      const inbox = await response.json();
+      const message = (inbox.messages ?? []).find(
+        (candidate: { ID: string; To: Array<{ Address: string }> }) =>
+          !existingMessageIds.has(candidate.ID) &&
+          candidate.To.some((recipient) => recipient.Address === recoveryEmail)
+      );
+      messageId = message?.ID;
+      return Boolean(messageId);
+    })
+    .toBe(true);
+
+  const messageResponse = await request.get(
+    `${MAILPIT_URL}/api/v1/message/${messageId}`
+  );
+  const message = await messageResponse.json();
+  const recoveryLink = (message.Text as string).match(/https?:\/\/[^\s)]+/)?.[0];
+  expect(recoveryLink).toBeTruthy();
+
+  await page.goto(recoveryLink!);
+  await expect(page).toHaveURL(/\/auth\/set-password$/);
+  await page.getByLabel("Password", { exact: true }).fill(RECOVERY_PASSWORD);
+  await page.getByLabel("Confirm password").fill(RECOVERY_PASSWORD);
+  await page.getByRole("button", { name: "Set password and continue" }).click();
+  await expect(page).toHaveURL(/\/dashboard$/);
 });

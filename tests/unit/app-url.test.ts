@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { configuredAppUrl, normalizeAppUrl } from "@/lib/app-url";
+import {
+  canonicalRequestUrl,
+  configuredAppUrl,
+  normalizeAppUrl,
+} from "@/lib/app-url";
 
 const originalAppUrl = process.env.NEXT_PUBLIC_APP_URL;
 
@@ -38,5 +42,25 @@ describe("configuredAppUrl", () => {
     expect(configuredAppUrl("https://preview.example.com/")).toBe(
       "https://preview.example.com"
     );
+  });
+});
+
+describe("canonicalRequestUrl", () => {
+  it("moves a Vercel request to the configured production origin", () => {
+    expect(
+      canonicalRequestUrl(
+        "https://resident-pass-example.vercel.app/auth/oauth/callback?code=abc",
+        "https://residentpass.net"
+      )?.toString()
+    ).toBe("https://residentpass.net/auth/oauth/callback?code=abc");
+  });
+
+  it("does nothing when the request is already canonical", () => {
+    expect(
+      canonicalRequestUrl(
+        "https://residentpass.net/auth/sign-in",
+        "https://residentpass.net"
+      )
+    ).toBeNull();
   });
 });

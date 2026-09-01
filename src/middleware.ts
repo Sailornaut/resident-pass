@@ -6,11 +6,21 @@
 
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { canonicalRequestUrl } from "@/lib/app-url";
 
 const PUBLIC_PREFIXES = ["/verify", "/auth", "/api/public", "/_next", "/favicon"];
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  // OAuth PKCE cookies are host-scoped. Force production traffic onto the
+  // configured public origin before authentication begins so callbacks and
+  // invitation links cannot strand sessions on a Vercel deployment hostname.
+  const configuredUrl = process.env.NEXT_PUBLIC_APP_URL;
+  if (process.env.VERCEL_ENV === "production" && configuredUrl) {
+    const canonicalUrl = canonicalRequestUrl(request.url, configuredUrl);
+    if (canonicalUrl) return NextResponse.redirect(canonicalUrl, 308);
+  }
 
   let response = NextResponse.next({ request });
 

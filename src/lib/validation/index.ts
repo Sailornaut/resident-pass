@@ -58,6 +58,13 @@ export const addResidentSchema = z.object({
   unit_id: z.string().uuid("Select a unit"),
 });
 
+export const createAccessRequestSchema = z.object({
+  full_name: z.string().trim().min(2, "Name is required").max(80),
+  email: z.string().trim().email("Enter a valid email address").max(254),
+  requested_unit_label: z.string().trim().min(3, "Unit address is required").max(120),
+  community_id: z.string().uuid("Select a community"),
+});
+
 export const grantPassAllowanceSchema = z.object({
   additional_passes: z.coerce.number().int().min(1).max(20),
   valid_days: z.coerce.number().int().min(1).max(90),

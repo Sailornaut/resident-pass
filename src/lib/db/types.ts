@@ -9,6 +9,7 @@ export type UnitStatus = "active" | "inactive";
 export type UserStatus = "active" | "inactive" | "suspended";
 export type MembershipStatus = "active" | "inactive" | "invited";
 export type MembershipRole = "resident" | "admin" | "verifier" | "platform_admin";
+export type AccessRequestStatus = "pending" | "approved" | "denied" | "closed";
 
 export type PassStatus =
   | "scheduled"
@@ -110,6 +111,21 @@ export interface PassAllowanceGrant {
   reason: string | null;
   expires_at: string;
   created_at: string;
+}
+
+export interface UserAccessRequest {
+  id: string;
+  community_id: string;
+  requester_user_id: string | null;
+  email: string;
+  full_name: string | null;
+  requested_unit_label: string;
+  note: string | null;
+  status: AccessRequestStatus;
+  reviewed_by_user_id: string | null;
+  reviewed_at: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface ParkingPass {

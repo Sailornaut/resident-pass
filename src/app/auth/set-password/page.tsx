@@ -12,7 +12,7 @@ export default function SetPasswordPage() {
           </span>
           <h1 className="mt-4 text-2xl font-bold text-gray-900">Set your password</h1>
           <p className="mt-1 text-sm text-gray-500">
-            Finish setting up your ResidentPass account.
+            Finish setting up or recovering your ResidentPass account.
           </p>
         </div>
         <SetPasswordForm />

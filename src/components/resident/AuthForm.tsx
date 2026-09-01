@@ -3,9 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { createBrowserClient } from "@supabase/ssr";
 import { Button } from "@/components/ui/Button";
+import { AccessRequestForm } from "@/components/resident/AccessRequestForm";
 import { FormError, FormSuccess, inputClasses } from "@/components/ui/FormField";
-
-type AuthMode = "sign-in" | "sign-up";
+import { configuredAppUrl } from "@/lib/app-url";
+import type { Community } from "@/lib/db/types";
 
 type AuthErrorLike = {
   code?: string;
@@ -13,8 +14,7 @@ type AuthErrorLike = {
 };
 
 export function authErrorMessage(
-  authError: AuthErrorLike,
-  mode: AuthMode
+  authError: AuthErrorLike
 ): string {
   if (authError.status === 429 || authError.code === "over_request_rate_limit") {
     return "Too many attempts. Please wait a few minutes and try again.";
@@ -28,52 +28,31 @@ export function authErrorMessage(
     return "The email or password is incorrect.";
   }
 
-  if (
-    authError.code === "user_already_exists" ||
-    authError.code === "identity_already_exists"
-  ) {
-    return "An account already exists for this email. Sign in instead.";
-  }
-
-  if (authError.code === "weak_password") {
-    return "Choose a stronger password with at least 8 characters.";
-  }
-
   if (authError.code === "signup_disabled") {
     return "Account creation is currently unavailable.";
   }
 
-  return mode === "sign-in"
-    ? "Could not sign in. Please try again."
-    : "Could not create your account. Please try again.";
+  return "Could not sign in. Please try again.";
 }
 
-function validationMessage(
-  email: string,
-  password: string,
-  passwordConfirmation: string,
-  mode: AuthMode
-): string | null {
+function validationMessage(email: string, password: string): string | null {
   if (!/^\S+@\S+\.\S+$/.test(email)) return "Enter a valid email address.";
   if (password.length < 8) return "Password must be at least 8 characters.";
-  if (mode === "sign-up" && password !== passwordConfirmation) {
-    return "Passwords do not match.";
-  }
   return null;
 }
 
 type AuthFormProps = {
   initialError?: string;
+  communities: Array<Pick<Community, "id" | "name">>;
 };
 
-export function AuthForm({ initialError }: AuthFormProps) {
-  const [mode, setMode] = useState<AuthMode>("sign-in");
+export function AuthForm({ initialError, communities }: AuthFormProps) {
+  const [mode, setMode] = useState<"sign-in" | "request-account">("sign-in");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [passwordConfirmation, setPasswordConfirmation] = useState("");
   const [error, setError] = useState<string | null>(initialError ?? null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [pending, setPending] = useState<"password" | "google" | null>(null);
+  const [pending, setPending] = useState<"sign-in" | "recovery" | "google" | null>(null);
   const supabase = useMemo(
     () =>
       createBrowserClient(
@@ -115,14 +94,6 @@ export function AuthForm({ initialError }: AuthFormProps) {
     void routePendingInvitation();
   }, [supabase]);
 
-  function switchMode(nextMode: AuthMode) {
-    setMode(nextMode);
-    setError(null);
-    setSuccess(null);
-    setPassword("");
-    setPasswordConfirmation("");
-  }
-
   async function completeProfile(): Promise<boolean> {
     const response = await fetch("/auth/complete-profile", { method: "POST" });
     if (response.ok) return true;
@@ -137,57 +108,20 @@ export function AuthForm({ initialError }: AuthFormProps) {
     setSuccess(null);
 
     const normalizedEmail = email.trim().toLowerCase();
-    const validationError = validationMessage(
-      normalizedEmail,
-      password,
-      passwordConfirmation,
-      mode
-    );
+    const validationError = validationMessage(normalizedEmail, password);
     if (validationError) {
       setError(validationError);
       return;
     }
 
-    setPending("password");
-
-    if (mode === "sign-in") {
-      const { error: authError } = await supabase.auth.signInWithPassword({
-        email: normalizedEmail,
-        password,
-      });
-
-      if (authError) {
-        setError(authErrorMessage(authError, mode));
-        setPending(null);
-        return;
-      }
-
-      if (await completeProfile()) window.location.assign("/");
-      setPending(null);
-      return;
-    }
-
-    const { data, error: authError } = await supabase.auth.signUp({
+    setPending("sign-in");
+    const { error: authError } = await supabase.auth.signInWithPassword({
       email: normalizedEmail,
       password,
     });
 
     if (authError) {
-      setError(authErrorMessage(authError, mode));
-      setPending(null);
-      return;
-    }
-
-    if (!data.session) {
-      if (data.user?.identities?.length === 0) {
-        setError("An account already exists for this email. Sign in instead.");
-        setPending(null);
-        return;
-      }
-
-      setSuccess(
-        "Account created. Email confirmation is required before you can sign in."
-      );
+      setError(authErrorMessage(authError));
       setPending(null);
       return;
     }
@@ -196,15 +130,47 @@ export function AuthForm({ initialError }: AuthFormProps) {
     setPending(null);
   }
 
+  async function handlePasswordRecovery() {
+    setError(null);
+    setSuccess(null);
+
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!/^\S+@\S+\.\S+$/.test(normalizedEmail)) {
+      setError("Enter your email address first.");
+      return;
+    }
+
+    setPending("recovery");
+    const appUrl = configuredAppUrl(window.location.origin);
+    const { error: recoveryError } = await supabase.auth.resetPasswordForEmail(
+      normalizedEmail,
+      { redirectTo: `${appUrl}/auth/password/callback` }
+    );
+
+    if (recoveryError) {
+      setError(
+        recoveryError.status === 429
+          ? "Too many reset attempts. Please wait a few minutes and try again."
+          : "Could not send a password reset email. Please try again."
+      );
+    } else {
+      setSuccess(
+        "If that email has a ResidentPass account, a password setup link is on its way."
+      );
+    }
+    setPending(null);
+  }
+
   async function handleGoogleSignIn() {
     setError(null);
     setSuccess(null);
     setPending("google");
 
+    const appUrl = configuredAppUrl(window.location.origin);
     const { error: authError } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${window.location.origin}/auth/oauth/callback`,
+        redirectTo: `${appUrl}/auth/oauth/callback`,
         queryParams: { prompt: "select_account" },
       },
     });
@@ -222,9 +188,11 @@ export function AuthForm({ initialError }: AuthFormProps) {
           type="button"
           role="tab"
           aria-selected={mode === "sign-in"}
-          onClick={() => switchMode("sign-in")}
-          className={`rounded-md px-3 py-2 text-sm font-semibold transition-colors ${
-            mode === "sign-in" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"
+          onClick={() => setMode("sign-in")}
+          className={`rounded-md px-3 py-2 text-sm font-semibold transition ${
+            mode === "sign-in"
+              ? "bg-white text-gray-900 shadow-sm"
+              : "text-gray-500 hover:text-gray-900"
           }`}
         >
           Sign in
@@ -232,16 +200,22 @@ export function AuthForm({ initialError }: AuthFormProps) {
         <button
           type="button"
           role="tab"
-          aria-selected={mode === "sign-up"}
-          onClick={() => switchMode("sign-up")}
-          className={`rounded-md px-3 py-2 text-sm font-semibold transition-colors ${
-            mode === "sign-up" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"
+          aria-selected={mode === "request-account"}
+          onClick={() => setMode("request-account")}
+          className={`rounded-md px-3 py-2 text-sm font-semibold transition ${
+            mode === "request-account"
+              ? "bg-white text-gray-900 shadow-sm"
+              : "text-gray-500 hover:text-gray-900"
           }`}
         >
-          Create account
+          Request account
         </button>
       </div>
 
+      {mode === "request-account" ? (
+        <AccessRequestForm communities={communities} />
+      ) : (
+        <>
       <Button
         type="button"
         variant="secondary"
@@ -296,47 +270,30 @@ export function AuthForm({ initialError }: AuthFormProps) {
             type="password"
             value={password}
             onChange={(event) => setPassword(event.target.value)}
-            autoComplete={mode === "sign-in" ? "current-password" : "new-password"}
+            autoComplete="current-password"
             minLength={8}
             className={`${inputClasses} mt-1.5`}
             required
           />
-          {mode === "sign-up" && (
-            <p className="mt-1 text-xs text-gray-500">Use at least 8 characters.</p>
-          )}
         </div>
 
-        {mode === "sign-up" && (
-          <div>
-            <label
-              htmlFor="password_confirmation"
-              className="block text-sm font-medium text-gray-900"
-            >
-              Confirm password
-            </label>
-            <input
-              id="password_confirmation"
-              type="password"
-              value={passwordConfirmation}
-              onChange={(event) => setPasswordConfirmation(event.target.value)}
-              autoComplete="new-password"
-              minLength={8}
-              className={`${inputClasses} mt-1.5`}
-              required
-            />
-          </div>
-        )}
-
         <Button type="submit" size="lg" className="w-full" disabled={pending !== null}>
-          {pending === "password"
-            ? mode === "sign-in" ? "Signing in…" : "Creating account…"
-            : mode === "sign-in" ? "Sign in" : "Create account"}
+          {pending === "sign-in" ? "Signing in…" : "Sign in"}
         </Button>
 
         <p className="text-center text-xs text-gray-400">
-          Forgot password? <span className="font-medium">Coming soon</span>
+          <button
+            type="button"
+            onClick={handlePasswordRecovery}
+            disabled={pending !== null}
+            className="font-medium text-brand-600 hover:text-brand-700 disabled:text-gray-400"
+          >
+            {pending === "recovery" ? "Sending reset link…" : "Forgot or need a password?"}
+          </button>
         </p>
       </form>
+        </>
+      )}
     </div>
   );
 }

@@ -32,7 +32,7 @@ export function SetPasswordForm() {
           refresh_token: refreshToken,
         });
         if (sessionError) {
-          setError("This invitation is invalid or has expired. Ask your community administrator for a new one.");
+          setError("This password setup link is invalid or has expired. Request a new link or contact your community administrator.");
           return;
         }
 
@@ -47,7 +47,7 @@ export function SetPasswordForm() {
       if (session) {
         setSessionReady(true);
       } else {
-        setError("This invitation is invalid or has expired. Ask your community administrator for a new one.");
+        setError("This password setup link is invalid or has expired. Request a new link or contact your community administrator.");
       }
     }
 
@@ -74,7 +74,7 @@ export function SetPasswordForm() {
       setError(
         passwordError.code === "weak_password"
           ? "Choose a stronger password with at least 8 characters."
-          : "Could not set your password. The invitation may have expired."
+          : "Could not set your password. The setup link may have expired."
       );
       setPending(false);
       return;

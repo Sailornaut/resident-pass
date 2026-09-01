@@ -20,3 +20,15 @@ export function normalizeAppUrl(value: string): string {
 export function configuredAppUrl(fallback = "http://localhost:3000"): string {
   return normalizeAppUrl(process.env.NEXT_PUBLIC_APP_URL || fallback);
 }
+
+/** Build the same path/query on the configured canonical application origin. */
+export function canonicalRequestUrl(
+  requestUrl: string,
+  configuredUrl: string
+): URL | null {
+  const request = new URL(requestUrl);
+  const canonicalOrigin = normalizeAppUrl(configuredUrl);
+  if (request.origin === canonicalOrigin) return null;
+
+  return new URL(`${request.pathname}${request.search}`, canonicalOrigin);
+}

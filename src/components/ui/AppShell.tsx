@@ -10,11 +10,13 @@ export function AppShell({
   navItems,
   userEmail,
   roleLabel,
+  headerActions,
   children,
 }: {
   navItems: NavItem[];
   userEmail?: string;
   roleLabel?: string;
+  headerActions?: ReactNode;
   children: ReactNode;
 }) {
   return (
@@ -43,6 +45,7 @@ export function AppShell({
             </nav>
           </div>
           <div className="flex items-center gap-3">
+            {headerActions}
             {roleLabel && (
               <span className="hidden rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-600 sm:inline-flex">
                 {roleLabel}

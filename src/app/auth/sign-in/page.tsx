@@ -1,4 +1,6 @@
 import { AuthForm } from "@/components/resident/AuthForm";
+import { createAdminSupabase } from "@/lib/db/client";
+import type { Community } from "@/lib/db/types";
 
 export const metadata = { title: "Sign In" };
 
@@ -9,10 +11,18 @@ type SignInPageProps = {
 export default async function SignInPage({ searchParams }: SignInPageProps) {
   const { auth_error: authError } = await searchParams;
   const initialError = authError
-    ? authError === "profile"
+    ? authError === "recovery"
+      ? "That password reset link is invalid or has expired. Request a new one."
+      : authError === "profile"
       ? "You are signed in, but we could not finish setting up your account. Please try again."
       : "Google sign-in could not be completed. Please try again."
     : undefined;
+  const admin = createAdminSupabase();
+  const { data: communities } = await admin
+    .from("communities")
+    .select("id, name")
+    .eq("status", "active")
+    .order("name");
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
@@ -28,10 +38,12 @@ export default async function SignInPage({ searchParams }: SignInPageProps) {
             Manage your guest parking passes
           </p>
         </div>
-        <AuthForm initialError={initialError} />
+        <AuthForm
+          initialError={initialError}
+          communities={(communities ?? []) as Array<Pick<Community, "id" | "name">>}
+        />
         <p className="text-center text-xs text-gray-400">
-          Create your account, then contact your property manager to be assigned
-          to your community and unit.
+          Account requests are reviewed by your community before access is granted.
         </p>
       </div>
     </div>

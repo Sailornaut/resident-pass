@@ -284,13 +284,28 @@ export async function addResidentAction(
     return { ok: false, message: "The unit assignment could not be saved." };
   }
 
+  // A request is only approved after the existing membership workflow succeeds.
+  // This keeps the inbox status downstream of the actual authorization change.
+  await admin
+    .from("user_access_requests")
+    .update({
+      status: "approved",
+      requester_user_id: authUser.id,
+      reviewed_by_user_id: ctx.userId,
+      reviewed_at: new Date().toISOString(),
+    })
+    .eq("email", email)
+    .eq("community_id", communityId)
+    .eq("status", "pending");
+
   revalidatePath("/admin/units");
+  revalidatePath("/admin/user-requests");
   return {
     ok: true,
     message: invitationSent
       ? `Invitation sent to ${email}. The selected unit is reserved until account setup is complete.`
       : invitationPending
-        ? `${email} already has a pending invitation. The selected unit remains reserved.`
-      : `${email} is now assigned to the selected unit.`,
+        ? `${email} already has a pending invitation. The selected unit remains reserved; they can use the invitation or reset their password from the sign-in page.`
+        : `${email} is now assigned to the selected unit. If they do not know their password, they can reset it from the sign-in page.`,
   };
 }
