@@ -59,14 +59,21 @@ export default async function RequestPassPage() {
 
       {r && (
         <div className="rounded-lg bg-brand-50 px-4 py-3 text-sm text-brand-800 ring-1 ring-brand-100">
-          Passes may last up to <strong>{r.max_duration_hours} hours</strong>, be
-          requested up to <strong>{r.advance_window_days} days</strong> in advance, with
-          at most <strong>{r.max_active_passes} active</strong> at a time and{" "}
-          <strong>{r.monthly_limit + monthlyAllowanceBonus} per rolling 30 days</strong>
-          {monthlyAllowanceBonus > 0 && (
-            <> ({r.monthly_limit} standard + {monthlyAllowanceBonus} approved)</>
-          )}
-          .
+          <p>
+            Each pass may last up to <strong>{r.max_duration_hours} hours</strong> and
+            may be requested up to <strong>{r.advance_window_days} days</strong> in
+            advance. Your unit may have at most{" "}
+            <strong>{r.max_active_passes} active or upcoming passes</strong> at once.
+          </p>
+          <p className="mt-2">
+            The rolling 30-day allowance is an issuance limit—not one pass&apos;s
+            duration. Your unit may create{" "}
+            <strong>{r.monthly_limit + monthlyAllowanceBonus} passes during any 30-day period</strong>
+            {monthlyAllowanceBonus > 0 && (
+              <> ({r.monthly_limit} standard + {monthlyAllowanceBonus} approved)</>
+            )}
+            . Cancelled or revoked passes still count toward that issuance total.
+          </p>
         </div>
       )}
 

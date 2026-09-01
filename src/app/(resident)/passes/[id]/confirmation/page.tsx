@@ -44,6 +44,7 @@ export default async function PassConfirmationPage({
     p,
     (rules as ParkingRuleSet | null)?.allow_resident_cancel ?? true
   );
+  const printable = status !== "revoked" && status !== "cancelled";
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
@@ -125,12 +126,18 @@ export default async function PassConfirmationPage({
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex gap-3">
-          <Link
-            href={`/passes/${p.id}/print`}
-            className="inline-flex items-center rounded-lg bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"
-          >
-            Print / Save as PDF
-          </Link>
+          {printable ? (
+            <Link
+              href={`/passes/${p.id}/print`}
+              className="inline-flex items-center rounded-lg bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"
+            >
+              Print / Save as PDF
+            </Link>
+          ) : (
+            <p className="rounded-lg bg-gray-100 px-4 py-2.5 text-sm font-medium text-gray-600">
+              Printing is unavailable for {status} passes.
+            </p>
+          )}
           <Link
             href="/dashboard"
             className="inline-flex items-center rounded-lg px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-100"

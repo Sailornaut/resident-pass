@@ -19,6 +19,7 @@ import type {
 } from "@/lib/db/types";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const RECENT_VERIFICATION_WINDOW_MS = 5 * 60 * 1000;
 
 export interface IssueResult {
   ok: boolean;
@@ -270,7 +271,7 @@ export async function verifyByPublicCode(rawCode: string): Promise<VerificationR
   const admin = createAdminSupabase();
   const { data: pass } = await admin
     .from("parking_passes")
-    .select("id, public_code, plate, plate_state, valid_from, valid_until, status, communities(name)")
+    .select("id, public_code, plate, plate_state, valid_from, valid_until, status, communities(name, timezone)")
     .eq("public_code", code)
     .maybeSingle();
 
@@ -278,19 +279,73 @@ export async function verifyByPublicCode(rawCode: string): Promise<VerificationR
     return { status: "not_found" };
   }
 
-  const p = pass as unknown as ParkingPass & { communities: { name: string } };
+  const p = pass as unknown as ParkingPass & {
+    communities: { name: string; timezone: string };
+  };
   const status = effectiveStatus(p);
-
-  await recordEvent(p.id, null, "verified", { result: status });
+  const scanContext = await recordVerificationScan(p.id, status);
 
   return {
     status,
     community_name: p.communities?.name,
+    community_timezone: p.communities?.timezone,
     plate: p.plate,
     plate_state: p.plate_state,
     valid_from: p.valid_from,
     valid_until: p.valid_until,
     public_code: p.public_code,
+    ...scanContext,
+  };
+}
+
+async function recordVerificationScan(
+  passId: string,
+  result: VerificationResult["status"]
+): Promise<Pick<VerificationResult, "scan_count" | "previous_scan_at" | "recently_verified">> {
+  const admin = createAdminSupabase();
+  const { data: event, error } = await admin
+    .from("pass_events")
+    .insert({
+      pass_id: passId,
+      actor_user_id: null,
+      event_type: "verified",
+      metadata: { result },
+    })
+    .select("id, created_at")
+    .single();
+
+  if (error || !event) {
+    console.error("Could not record pass verification event", error);
+    return {};
+  }
+
+  const [{ count }, { data: previousScan }] = await Promise.all([
+    admin
+      .from("pass_events")
+      .select("id", { count: "exact", head: true })
+      .eq("pass_id", passId)
+      .eq("event_type", "verified"),
+    admin
+      .from("pass_events")
+      .select("created_at")
+      .eq("pass_id", passId)
+      .eq("event_type", "verified")
+      .neq("id", event.id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
+
+  const previousScanAt = previousScan?.created_at;
+  const recentlyVerified = previousScanAt
+    ? new Date(event.created_at).getTime() - new Date(previousScanAt).getTime() <=
+      RECENT_VERIFICATION_WINDOW_MS
+    : false;
+
+  return {
+    scan_count: count ?? 1,
+    previous_scan_at: previousScanAt,
+    recently_verified: recentlyVerified,
   };
 }
 

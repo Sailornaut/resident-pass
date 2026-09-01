@@ -3,6 +3,7 @@ import Link from "next/link";
 import { requireAuthorizedContext } from "@/lib/auth";
 import { createServerSupabase } from "@/lib/db/client";
 import { generateQrDataUrl } from "@/lib/qr";
+import { effectiveStatus } from "@/lib/parking-rules/status";
 import { PrintablePass } from "@/components/parking-pass/PrintablePass";
 import { PrintButton } from "@/components/parking-pass/PrintButton";
 import type { Community, ParkingPass } from "@/lib/db/types";
@@ -27,6 +28,8 @@ export default async function PrintPassPage({
   if (!pass) notFound();
 
   const p = pass as ParkingPass & { communities: Community };
+  const status = effectiveStatus(p);
+  const printable = status !== "revoked" && status !== "cancelled";
   const qrDataUrl = await generateQrDataUrl(p.public_code);
 
   return (
@@ -38,8 +41,14 @@ export default async function PrintPassPage({
         >
           ← Back to pass
         </Link>
-        <PrintButton />
+        {printable && <PrintButton />}
       </div>
+
+      {!printable && (
+        <div className="no-print rounded-lg bg-gray-100 px-4 py-3 text-center text-sm font-medium text-gray-700">
+          This pass is {status}. Printing and saving are no longer available.
+        </div>
+      )}
 
       <PrintablePass
         pass={p}
@@ -48,10 +57,12 @@ export default async function PrintPassPage({
         qrDataUrl={qrDataUrl}
       />
 
-      <p className="no-print text-center text-xs text-gray-400">
-        Tip: use your browser&apos;s print dialog to save as PDF. The pass prints in
-        black and white on any home printer.
-      </p>
+      {printable && (
+        <p className="no-print text-center text-xs text-gray-400">
+          Tip: use your browser&apos;s print dialog to save as PDF. The pass prints in
+          black and white on any home printer.
+        </p>
+      )}
     </div>
   );
 }

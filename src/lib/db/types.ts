@@ -194,9 +194,13 @@ export interface UpdateRulesInput {
 export interface VerificationResult {
   status: EffectivePassStatus | "not_found";
   community_name?: string;
+  community_timezone?: string;
   plate?: string;
   plate_state?: string;
   valid_from?: string;
   valid_until?: string;
   public_code?: string;
+  scan_count?: number;
+  previous_scan_at?: string;
+  recently_verified?: boolean;
 }

@@ -66,6 +66,7 @@ export default async function VerifyPage({
   const { code } = await params;
   const result = await verifyByPublicCode(decodeURIComponent(code));
   const ui = STATUS_UI[result.status] ?? STATUS_UI.not_found;
+  const timezone = result.community_timezone ?? "America/New_York";
 
   return (
     <div className="flex min-h-screen flex-col bg-gray-50">
@@ -82,20 +83,39 @@ export default async function VerifyPage({
 
       <main className="mx-auto w-full max-w-md flex-1 px-4 py-8">
         {result.status !== "not_found" ? (
-          <div className="space-y-4 rounded-xl bg-white p-5 shadow-sm ring-1 ring-gray-200">
-            <Row label="Community" value={result.community_name ?? "—"} />
-            <Row
-              label="Vehicle plate"
-              value={`${result.plate ?? "—"} (${result.plate_state || "—"})`}
-              mono
-            />
-            {result.valid_from && (
-              <Row label="Valid from" value={formatDateTime(result.valid_from)} />
+          <div className="space-y-4">
+            {result.recently_verified && (
+              <div className="rounded-xl bg-amber-50 p-4 text-sm font-medium text-amber-900 ring-1 ring-amber-200">
+                Recently verified — confirm this pass is being used with the correct
+                vehicle.
+              </div>
             )}
-            {result.valid_until && (
-              <Row label="Valid until" value={formatDateTime(result.valid_until)} />
-            )}
-            <Row label="Pass ID" value={result.public_code ?? "—"} mono />
+            <div className="space-y-4 rounded-xl bg-white p-5 shadow-sm ring-1 ring-gray-200">
+              <Row label="Community" value={result.community_name ?? "—"} />
+              <Row
+                label="Vehicle plate"
+                value={`${result.plate ?? "—"} (${result.plate_state || "—"})`}
+                mono
+              />
+              {result.valid_from && (
+                <Row label="Valid from" value={formatDateTime(result.valid_from, timezone)} />
+              )}
+              {result.valid_until && (
+                <Row label="Valid until" value={formatDateTime(result.valid_until, timezone)} />
+              )}
+              <Row label="Pass ID" value={result.public_code ?? "—"} mono />
+              {result.scan_count !== undefined && (
+                <Row label="Verification count" value={String(result.scan_count)} />
+              )}
+              <Row
+                label="Previous verification"
+                value={
+                  result.previous_scan_at
+                    ? formatDateTime(result.previous_scan_at, timezone)
+                    : "No previous verifications"
+                }
+              />
+            </div>
           </div>
         ) : (
           <ManualCodeEntry initialValue={decodeURIComponent(code)} />
@@ -104,7 +124,7 @@ export default async function VerifyPage({
         <p className="mt-8 text-center text-xs text-gray-400">
           Status reflects the live system record, including revocations.
           <br />
-          Times shown in Eastern Time.
+          Times shown in {timezone}.
         </p>
       </main>
     </div>

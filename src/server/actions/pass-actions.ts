@@ -8,6 +8,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireAuthorizedContext } from "@/lib/auth";
 import { createPassSchema, flattenErrors } from "@/lib/validation";
+import { ruleViolationsToFormErrors } from "@/lib/parking-rules/form-support";
 import { issuePass, cancelPass } from "@/server/services/pass-service";
 
 export interface ActionState {
@@ -15,6 +16,7 @@ export interface ActionState {
   errors?: Record<string, string>;
   message?: string;
   passId?: string;
+  values?: Record<string, string>;
 }
 
 /**
@@ -34,20 +36,26 @@ export async function createPassAction(
 ): Promise<ActionState> {
   const ctx = await requireAuthorizedContext();
 
+  const values = {
+    unit_id: String(formData.get("unit_id") ?? ""),
+    plate: String(formData.get("plate") ?? ""),
+    plate_state: String(formData.get("plate_state") ?? ""),
+    vehicle_make: String(formData.get("vehicle_make") ?? ""),
+    vehicle_color: String(formData.get("vehicle_color") ?? ""),
+    guest_name: String(formData.get("guest_name") ?? ""),
+    note: String(formData.get("note") ?? ""),
+    valid_from: String(formData.get("valid_from") ?? ""),
+    valid_until: String(formData.get("valid_until") ?? ""),
+  };
+
   const parsed = createPassSchema.safeParse({
-    unit_id: formData.get("unit_id"),
-    plate: formData.get("plate"),
-    plate_state: formData.get("plate_state"),
-    vehicle_make: formData.get("vehicle_make") ?? "",
-    vehicle_color: formData.get("vehicle_color") ?? "",
-    guest_name: formData.get("guest_name") ?? "",
-    note: formData.get("note") ?? "",
-    valid_from: toIso(formData.get("valid_from")),
-    valid_until: toIso(formData.get("valid_until")),
+    ...values,
+    valid_from: toIso(values.valid_from),
+    valid_until: toIso(values.valid_until),
   });
 
   if (!parsed.success) {
-    return { ok: false, errors: flattenErrors(parsed.error) };
+    return { ok: false, errors: flattenErrors(parsed.error), values };
   }
 
   const result = await issuePass(ctx, parsed.data);
@@ -56,10 +64,15 @@ export async function createPassAction(
     if (result.evaluation) {
       return {
         ok: false,
-        errors: { _form: result.evaluation.violations.map((v) => v.message).join(" ") },
+        errors: ruleViolationsToFormErrors(result.evaluation.violations),
+        values,
       };
     }
-    return { ok: false, errors: { _form: result.error ?? "Something went wrong." } };
+    return {
+      ok: false,
+      errors: { _form: result.error ?? "Something went wrong." },
+      values,
+    };
   }
 
   revalidatePath("/dashboard");

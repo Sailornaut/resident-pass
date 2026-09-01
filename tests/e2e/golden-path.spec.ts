@@ -33,6 +33,10 @@ function toDateTimeLocal(date: Date): string {
   return local.toISOString().slice(0, 16);
 }
 
+function floorToHalfHour(date: Date): Date {
+  return new Date(Math.floor(date.getTime() / (30 * 60_000)) * 30 * 60_000);
+}
+
 test.beforeEach(async () => {
   const [{ error: passError }, { error: grantError }, { error: requestError }] = await Promise.all([
     adminClient.from("parking_passes").delete().like("plate", "E2E%"),
@@ -71,27 +75,40 @@ test("resident issues a pass, enforcement verifies it, and admin revokes it", as
   );
 
   const now = new Date();
+  const passStart = floorToHalfHour(now);
+  const passEnd = new Date(passStart.getTime() + 2 * 60 * 60_000);
   await residentPage.goto("/passes/new");
   await residentPage.getByLabel("Guest license plate").fill(E2E_PLATE);
   await residentPage.getByLabel("State").selectOption("NC");
   await residentPage
     .getByLabel("Valid from")
-    .fill(toDateTimeLocal(new Date(now.getTime() - 5 * 60_000)));
+    .fill(toDateTimeLocal(passStart));
   await residentPage
     .getByLabel("Valid until")
-    .fill(toDateTimeLocal(new Date(now.getTime() + 2 * 60 * 60_000)));
+    .fill(toDateTimeLocal(passEnd));
   await residentPage.getByRole("button", { name: "Request Pass" }).click();
 
   await expect(residentPage.getByRole("heading", { name: "Your pass is ready" })).toBeVisible();
   const passCodeLocator = residentPage.getByText(/^RP-[A-Z0-9]{4}-[A-Z0-9]{4}$/).first();
   await expect(passCodeLocator).toBeVisible();
   const passCode = (await passCodeLocator.innerText()).trim();
+  const passId = new URL(residentPage.url()).pathname.split("/")[2];
 
   const verifierContext = await browser.newContext({ baseURL: APP_URL });
   const verifierPage = await verifierContext.newPage();
   await verifierPage.goto(`/verify/${passCode}`);
   await expect(verifierPage.getByRole("heading", { name: "VALID" })).toBeVisible();
   await expect(verifierPage.getByText(E2E_PLATE)).toBeVisible();
+  await expect(verifierPage.getByText("1", { exact: true })).toBeVisible();
+  await expect(verifierPage.getByText("No previous verifications")).toBeVisible();
+
+  await verifierPage.reload();
+  await expect(verifierPage.getByText("2", { exact: true })).toBeVisible();
+  await expect(
+    verifierPage.getByText(
+      "Recently verified — confirm this pass is being used with the correct vehicle."
+    )
+  ).toBeVisible();
 
   const adminContext = await browser.newContext({ baseURL: APP_URL });
   const adminPage = await adminContext.newPage();
@@ -110,6 +127,20 @@ test("resident issues a pass, enforcement verifies it, and admin revokes it", as
 
   await verifierPage.reload();
   await expect(verifierPage.getByRole("heading", { name: "REVOKED" })).toBeVisible();
+
+  await residentPage.reload();
+  await expect(residentPage.getByText("Printing is unavailable for revoked passes.")).toBeVisible();
+  await expect(
+    residentPage.getByRole("link", { name: "Print / Save as PDF" })
+  ).toHaveCount(0);
+
+  await residentPage.goto(`/passes/${passId}/print`);
+  await expect(
+    residentPage.getByText("This pass is revoked. Printing and saving are no longer available.")
+  ).toBeVisible();
+  await expect(
+    residentPage.getByRole("button", { name: "Print / Save as PDF" })
+  ).toHaveCount(0);
 
   await Promise.all([
     residentContext.close(),
@@ -138,6 +169,8 @@ test("cancelled passes still consume the rolling monthly allowance", async ({
   if (membershipError) throw membershipError;
 
   const now = new Date();
+  const passStart = floorToHalfHour(now);
+  const passEnd = new Date(passStart.getTime() + 2 * 60 * 60_000);
   const { error: insertError } = await adminClient.from("parking_passes").insert(
     Array.from({ length: 8 }, (_, index) => ({
       public_code: `RP-E2E${index + 1}-M${String(index + 1).padStart(3, "0")}`,
@@ -163,15 +196,19 @@ test("cancelled passes still consume the rolling monthly allowance", async ({
   await page.getByLabel("State").selectOption("NC");
   await page
     .getByLabel("Valid from")
-    .fill(toDateTimeLocal(new Date(now.getTime() - 5 * 60_000)));
+    .fill(toDateTimeLocal(passStart));
   await page
     .getByLabel("Valid until")
-    .fill(toDateTimeLocal(new Date(now.getTime() + 2 * 60 * 60_000)));
+    .fill(toDateTimeLocal(passEnd));
   await page.getByRole("button", { name: "Request Pass" }).click();
 
   await expect(
     page.getByText("This unit has reached its limit of 8 passes in the past 30 days.")
   ).toBeVisible();
+  await expect(page.getByLabel("Guest license plate")).toHaveValue(E2E_PLATE);
+  await expect(page.getByLabel("State")).toHaveValue("NC");
+  await expect(page.getByLabel("Valid from")).not.toHaveValue("");
+  await expect(page.getByLabel("Valid until")).not.toHaveValue("");
 
   const { count, error: countError } = await adminClient
     .from("parking_passes")
@@ -203,10 +240,10 @@ test("cancelled passes still consume the rolling monthly allowance", async ({
   await page.getByLabel("State").selectOption("NC");
   await page
     .getByLabel("Valid from")
-    .fill(toDateTimeLocal(new Date(now.getTime() - 5 * 60_000)));
+    .fill(toDateTimeLocal(passStart));
   await page
     .getByLabel("Valid until")
-    .fill(toDateTimeLocal(new Date(now.getTime() + 2 * 60 * 60_000)));
+    .fill(toDateTimeLocal(passEnd));
   await page.getByRole("button", { name: "Request Pass" }).click();
   await expect(page.getByRole("heading", { name: "Your pass is ready" })).toBeVisible();
 
