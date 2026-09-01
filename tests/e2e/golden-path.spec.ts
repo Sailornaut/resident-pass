@@ -473,7 +473,7 @@ test("a public account request reaches the admin inbox without creating access",
   expect(pendingRequest.requester_user_id).toBeNull();
   expect(pendingRequest.status).toBe("pending");
 
-  const { error: createError } = await adminClient.auth.admin.createUser({
+  const { data: createdUser, error: createError } = await adminClient.auth.admin.createUser({
     email: UNLINKED_EMAIL,
     password: E2E_PASSWORD,
     email_confirm: true,
@@ -492,22 +492,47 @@ test("a public account request reaches the admin inbox without creating access",
   await expect(adminPage.getByText(UNLINKED_EMAIL)).toBeVisible();
   await expect(adminPage.getByText("100 Oak Ridge Dr, Unit 301")).toBeVisible();
 
-  await adminPage.getByRole("link", { name: "Manage residents" }).click();
-  await adminPage.getByLabel("Resident email").fill(UNLINKED_EMAIL);
-  await adminPage.getByLabel("Resident name").fill("E2E Requesting Resident");
-  await adminPage.locator("#resident_unit_id").selectOption({
-    label: "301 — 100 Oak Ridge Dr, Unit 301",
+  await adminPage.getByRole("button", { name: "E2E Requesting Resident" }).click();
+  const requestDialog = adminPage.getByRole("dialog", {
+    name: "E2E Requesting Resident",
   });
-  await adminPage.getByRole("button", { name: "Assign or invite resident" }).click();
+  await expect(requestDialog).toBeVisible();
+  await expect(requestDialog.getByText(UNLINKED_EMAIL)).toBeVisible();
+  await expect(
+    requestDialog.getByText("100 Oak Ridge Dr, Unit 301", { exact: true })
+  ).toBeVisible();
+  await expect(requestDialog.getByText("Oak Ridge Condominiums")).toBeVisible();
+  await expect(requestDialog.getByText("pending", { exact: true })).toBeVisible();
+  await expect(requestDialog.getByLabel("Unit").locator("option:checked")).toHaveText(
+    "301 — 100 Oak Ridge Dr, Unit 301"
+  );
+  await requestDialog.getByRole("button", { name: "Assign to Unit" }).click();
+  await expect(adminPage.getByText("No pending user requests")).toBeVisible();
+  await expect(adminPage.getByLabel("No pending user requests")).toBeVisible();
+  await expect(requestDialog).toHaveCount(0);
 
   const { data: approvedRequest, error: requestError } = await adminClient
     .from("user_access_requests")
-    .select("status, requester_user_id")
+    .select("status, requester_user_id, reviewed_by_user_id, reviewed_at")
     .eq("email", UNLINKED_EMAIL)
     .single();
   if (requestError) throw requestError;
   expect(approvedRequest.status).toBe("approved");
-  expect(approvedRequest.requester_user_id).not.toBeNull();
+  expect(approvedRequest.requester_user_id).toBe(createdUser.user!.id);
+  expect(approvedRequest.reviewed_by_user_id).not.toBeNull();
+  expect(approvedRequest.reviewed_at).not.toBeNull();
+
+  const { data: assignedMembership, error: assignedMembershipError } = await adminClient
+    .from("memberships")
+    .select("unit_id, status, units(address_label)")
+    .eq("user_id", createdUser.user!.id)
+    .eq("role", "resident")
+    .single();
+  if (assignedMembershipError) throw assignedMembershipError;
+  expect(assignedMembership.status).toBe("active");
+  expect(
+    (assignedMembership.units as unknown as { address_label: string }).address_label
+  ).toBe("100 Oak Ridge Dr, Unit 301");
   await adminContext.close();
 });
 

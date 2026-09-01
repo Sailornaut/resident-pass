@@ -180,9 +180,34 @@ export async function addResidentAction(
     email: formData.get("email"),
     full_name: formData.get("full_name") ?? "",
     unit_id: formData.get("unit_id"),
+    request_id: formData.get("request_id") ?? "",
   });
   if (!parsed.success) {
     return { ok: false, errors: flattenErrors(parsed.error) };
+  }
+
+  const admin = createAdminSupabase();
+  const requestId = parsed.data.request_id || undefined;
+  let email = parsed.data.email.toLowerCase();
+  let fullName = parsed.data.full_name || "";
+
+  // When assigning from the inbox, source identity details from the exact
+  // tenant-scoped pending request rather than trusting hidden form values.
+  if (requestId) {
+    const { data: accessRequest, error: requestError } = await admin
+      .from("user_access_requests")
+      .select("email, full_name")
+      .eq("id", requestId)
+      .eq("community_id", communityId)
+      .eq("status", "pending")
+      .maybeSingle();
+
+    if (requestError || !accessRequest) {
+      return { ok: false, message: "This request is no longer pending or does not belong to this community." };
+    }
+
+    email = accessRequest.email.toLowerCase();
+    fullName = accessRequest.full_name || "";
   }
 
   const supabase = await createServerSupabase();
@@ -199,8 +224,6 @@ export async function addResidentAction(
     return { ok: false, message: "That unit does not belong to this community." };
   }
 
-  const admin = createAdminSupabase();
-  const email = parsed.data.email.toLowerCase();
   const { data: existingUsers, error: listError } =
     await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
   if (listError) {
@@ -220,8 +243,8 @@ export async function addResidentAction(
 
     const { data: inviteData, error: inviteError } =
       await admin.auth.admin.inviteUserByEmail(email, {
-        data: parsed.data.full_name
-          ? { full_name: parsed.data.full_name }
+        data: fullName
+          ? { full_name: fullName }
           : undefined,
         redirectTo: `${appUrl}/auth/set-password`,
       });
@@ -254,7 +277,7 @@ export async function addResidentAction(
     {
       id: authUser.id,
       email,
-      ...(parsed.data.full_name ? { full_name: parsed.data.full_name } : {}),
+      ...(fullName ? { full_name: fullName } : {}),
       status: "active",
     },
     { onConflict: "id" }
@@ -286,20 +309,40 @@ export async function addResidentAction(
 
   // A request is only approved after the existing membership workflow succeeds.
   // This keeps the inbox status downstream of the actual authorization change.
-  await admin
-    .from("user_access_requests")
-    .update({
-      status: "approved",
-      requester_user_id: authUser.id,
-      reviewed_by_user_id: ctx.userId,
-      reviewed_at: new Date().toISOString(),
-    })
-    .eq("email", email)
-    .eq("community_id", communityId)
-    .eq("status", "pending");
+  const review = {
+    status: "approved",
+    requester_user_id: authUser.id,
+    reviewed_by_user_id: ctx.userId,
+    reviewed_at: new Date().toISOString(),
+  };
+  const approvalResult = requestId
+    ? await admin
+        .from("user_access_requests")
+        .update(review)
+        .eq("id", requestId)
+        .eq("community_id", communityId)
+        .eq("status", "pending")
+        .select("id")
+        .maybeSingle()
+    : await admin
+        .from("user_access_requests")
+        .update(review)
+        .eq("email", email)
+        .eq("community_id", communityId)
+        .eq("status", "pending")
+        .select("id")
+        .maybeSingle();
+
+  if (approvalResult.error || (requestId && !approvalResult.data)) {
+    return {
+      ok: false,
+      message: "The resident was assigned, but the request could not be marked approved. Refresh the inbox before retrying.",
+    };
+  }
 
   revalidatePath("/admin/units");
   revalidatePath("/admin/user-requests");
+  revalidatePath("/admin", "layout");
   return {
     ok: true,
     message: invitationSent
